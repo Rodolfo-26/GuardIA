@@ -1,5 +1,6 @@
-﻿import { Outlet, useLocation } from "react-router-dom";
+import { Outlet, useLocation } from "react-router-dom";
 import Sidebar from "../components/sidebar/Sidebar";
+import { useAuth } from "../context/AuthContext";
 
 const PAGE_META: Record<string, { title: string; subtitle: string }> = {
   "/dashboard": {
@@ -30,10 +31,20 @@ const PAGE_META: Record<string, { title: string; subtitle: string }> = {
 
 export default function AppLayout() {
   const { pathname } = useLocation();
-  const meta = PAGE_META[pathname] ?? {
+  const { appRole } = useAuth();
+
+  const defaultMeta = PAGE_META[pathname] ?? {
     title: "GuardIA",
     subtitle: "Centro de comando de seguridad",
   };
+
+  const meta =
+    pathname === "/usuarios" && appRole !== "Admin" && appRole !== "Supervisor"
+      ? {
+          title: "Mi perfil",
+          subtitle: "Informacion de cuenta y permisos de acceso",
+        }
+      : defaultMeta;
 
   return (
     <div className="relative h-screen overflow-hidden bg-slate-950 text-slate-100">
@@ -66,7 +77,10 @@ export default function AppLayout() {
           className="absolute inset-y-0 -left-1/3 w-1/2 bg-gradient-to-r from-transparent via-cyan-300/12 to-transparent"
           style={{ animation: "guardiaBackdropSweep 9s linear infinite" }}
         />
-        <div className="absolute inset-0 bg-[linear-gradient(rgba(148,163,184,0.08)_1px,transparent_1px),linear-gradient(90deg,rgba(148,163,184,0.08)_1px,transparent_1px)] bg-[size:40px_40px]" style={{ animation: "guardiaGridMove 18s linear infinite" }} />
+        <div
+          className="absolute inset-0 bg-[linear-gradient(rgba(148,163,184,0.08)_1px,transparent_1px),linear-gradient(90deg,rgba(148,163,184,0.08)_1px,transparent_1px)] bg-[size:40px_40px]"
+          style={{ animation: "guardiaGridMove 18s linear infinite" }}
+        />
       </div>
 
       <div className="relative z-10 flex h-screen">

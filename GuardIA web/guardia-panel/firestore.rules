@@ -1,0 +1,86 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+    function signedIn() {
+      return request.auth != null;
+    }
+
+    function roleFromToken() {
+      return signedIn()
+        ? (
+            request.auth.token.appRole != null
+              ? request.auth.token.appRole
+              : (
+                  request.auth.token.role != null
+                    ? request.auth.token.role
+                    : (
+                        request.auth.token.admin == true
+                          ? "Admin"
+                          : null
+                      )
+                )
+          )
+        : null;
+    }
+
+    function effectiveRole() {
+      return roleFromToken();
+    }
+
+    function isAdmin() {
+      return signedIn() && effectiveRole() == "Admin";
+    }
+
+    function isSupervisor() {
+      return signedIn() && effectiveRole() == "Supervisor";
+    }
+
+    function isOperator() {
+      return signedIn() && effectiveRole() == "Operador";
+    }
+
+    function isOwner(userId) {
+      return signedIn() && request.auth.uid == userId;
+    }
+
+    match /usuarios/{userId} {
+      // Lectura:
+      // - Admin y Supervisor: pueden consultar usuarios.
+      // - Operador: solo su propio perfil.
+      allow read: if isOwner(userId) || isAdmin() || isSupervisor();
+
+      // Creacion:
+      // - Admin: crea cualquier usuario.
+      // - Usuario autenticado: puede autoprovisionar su propio perfil inicial.
+      allow create: if isAdmin() || (
+        isOwner(userId) &&
+        (
+          request.resource.data.role == "Operador" ||
+          request.resource.data.role == "Supervisor" ||
+          request.resource.data.role == "Admin"
+        )
+      );
+
+      // Actualizacion:
+      // - Admin: control total.
+      // - Supervisor: solo puede cambiar estado (no a admins).
+      // - Operador: solo puede editar displayName/site de su propio perfil.
+      allow update: if isAdmin() || (
+        isSupervisor() &&
+        resource.data.role != "Admin" &&
+        request.resource.data.diff(resource.data).changedKeys().hasOnly(["status", "updatedAt"])
+      ) || (
+        isOwner(userId) &&
+        isOperator() &&
+        request.resource.data.diff(resource.data).changedKeys().hasOnly(["displayName", "site", "updatedAt"])
+      );
+
+      allow delete: if isAdmin();
+    }
+
+    match /auditoria_usuarios/{logId} {
+      allow read: if isAdmin() || isSupervisor();
+      allow write: if false;
+    }
+  }
+}

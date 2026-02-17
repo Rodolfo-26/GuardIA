@@ -4,7 +4,9 @@ import NavItem from "./NavItem";
 
 export default function Sidebar() {
   const navigate = useNavigate();
-  const { logout } = useAuth();
+  const { logout, appRole } = useAuth();
+  const isAdminOrSupervisor = appRole === "Admin" || appRole === "Supervisor";
+  const usersLabel = isAdminOrSupervisor ? "Usuarios" : "Mi perfil";
 
   async function handleLogout() {
     await logout();
@@ -28,10 +30,10 @@ export default function Sidebar() {
           <nav className="space-y-2 border-t border-white/10 pt-4">
             <NavItem label="Dashboard" to="/dashboard" />
             <NavItem label="Monitoreo" to="/monitoreo" />
-            <NavItem label="Camaras" to="/camaras" />
             <NavItem label="Alertas" to="/alertas" />
             <NavItem label="Grabaciones" to="/grabaciones" />
-            <NavItem label="Usuarios" to="/usuarios" />
+            {isAdminOrSupervisor && <NavItem label="Camaras" to="/camaras" />}
+            <NavItem label={usersLabel} to="/usuarios" />
           </nav>
         </div>
 

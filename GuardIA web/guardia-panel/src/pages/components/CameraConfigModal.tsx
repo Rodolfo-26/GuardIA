@@ -8,17 +8,18 @@ export default function CameraConfigModal({
 }: {
   camera: Camera | null;
   onClose: () => void;
-  onSave: (patch: Pick<Camera, "recording" | "sensitivity" | "status">) => void;
+  onSave: (patch: Pick<Camera, "recording" | "sensitivity" | "status" | "streamUrl">) => void;
 }) {
   const [recording, setRecording] = useState(camera?.recording ?? true);
   const [sensitivity, setSensitivity] = useState(camera?.sensitivity ?? 60);
   const [status, setStatus] = useState<Camera["status"]>(camera?.status ?? "live");
+  const [streamUrl, setStreamUrl] = useState(camera?.streamUrl ?? "");
 
   if (!camera) return null;
 
   function handleSubmit(e: React.FormEvent) {
     e.preventDefault();
-    onSave({ recording, sensitivity, status });
+    onSave({ recording, sensitivity, status, streamUrl: streamUrl.trim() });
   }
 
   return (
@@ -74,6 +75,18 @@ export default function CameraConfigModal({
               <option value="offline">Offline</option>
             </select>
           </label>
+
+          <label className="grid gap-2 rounded-xl border border-white/10 bg-slate-950/70 p-3">
+            <span className="text-sm text-slate-200">URL de stream</span>
+            <input
+              type="text"
+              value={streamUrl}
+              onChange={(e) => setStreamUrl(e.target.value)}
+              placeholder="http://admin:admin@192.168.100.145:8081/video"
+              className="rounded-lg border border-cyan-300/20 bg-slate-900 px-3 py-2 text-sm text-slate-100 outline-none placeholder:text-slate-500"
+            />
+          </label>
+
         </div>
 
         <div className="mt-5 flex gap-2">

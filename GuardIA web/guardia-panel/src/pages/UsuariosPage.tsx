@@ -1,39 +1,139 @@
 import { useEffect, useMemo, useState } from "react";
+import { EmailAuthProvider, reauthenticateWithCredential } from "firebase/auth";
 import {
   closeUserSessions,
+  createUserWithAuth,
+  syncMyRoleClaim,
+  subscribeCurrentUser,
+  subscribeUserAuditLogs,
   subscribeUsers,
   updateUserRole,
   updateUserStatus,
   type AppUserRecord,
+  type UserAuditRecord,
   type AppUserRole,
   type AppUserStatus,
 } from "../services/users";
+import { useAuth } from "../context/AuthContext";
+import CreateUserModal from "./usuarios/components/CreateUserModal";
+import RoleVerificationModal from "./usuarios/components/RoleVerificationModal";
+import { DetailRow, MetricCard, StatusTag, formatAuditAction } from "./usuarios/components/UsersUi";
 
 export default function UsuariosPage() {
+  const { user } = useAuth();
+  const currentUserId = user?.uid ?? "";
   const [users, setUsers] = useState<AppUserRecord[]>([]);
   const [isLoading, setIsLoading] = useState(true);
+  const [auditLogs, setAuditLogs] = useState<UserAuditRecord[]>([]);
+  const [auditError, setAuditError] = useState("");
   const [error, setError] = useState("");
+  const [viewMode, setViewMode] = useState<"full" | "self">("full");
   const [actionError, setActionError] = useState("");
   const [query, setQuery] = useState("");
   const [statusFilter, setStatusFilter] = useState<AppUserStatus | "Todos">("Todos");
   const [roleFilter, setRoleFilter] = useState<AppUserRole | "Todos">("Todos");
   const [selectedId, setSelectedId] = useState<string>("");
+  const [pendingSelectId, setPendingSelectId] = useState<string | null>(null);
+  const [showCreateModal, setShowCreateModal] = useState(false);
+  const [roleVerification, setRoleVerification] = useState<{
+    targetId: string;
+    targetName: string;
+    nextRole: AppUserRole;
+  } | null>(null);
 
   useEffect(() => {
+    if (!user?.uid) return;
+
+    let fallbackUnsubscribe: (() => void) | null = null;
+    let retryUnsubscribe: (() => void) | null = null;
+
     const unsubscribe = subscribeUsers(
       (items) => {
         setUsers(items);
         setIsLoading(false);
         setError("");
+        setViewMode("full");
       },
-      () => {
+      (err) => {
+        const code = typeof err === "object" && err && "code" in err ? String(err.code) : "";
+        if (code.includes("permission-denied")) {
+          fallbackUnsubscribe = subscribeCurrentUser(
+            user.uid,
+            (items) => {
+              setUsers(items);
+              setIsLoading(false);
+              setViewMode("self");
+
+              const selfRole = items[0]?.role;
+              if (selfRole === "Admin" || selfRole === "Supervisor") {
+                // Si en perfil ya es Admin/Supervisor, re-sincronizamos claims y reintentamos listado global.
+                void (async () => {
+                  try {
+                    await syncMyRoleClaim();
+                    if (user) {
+                      await user.getIdToken(true);
+                    }
+                  } catch {
+                    // mantenemos fallback si falla la sincronizacion.
+                  }
+                  if (!retryUnsubscribe) {
+                    retryUnsubscribe = subscribeUsers(
+                      (fullItems) => {
+                        setUsers(fullItems);
+                        setIsLoading(false);
+                        setError("");
+                        setViewMode("full");
+                      },
+                      () => {
+                        setViewMode("self");
+                        setError("Acceso limitado: solo puedes ver tu perfil.");
+                      },
+                    );
+                  }
+                })();
+                return;
+              }
+
+              setError("Acceso limitado: solo puedes ver tu perfil.");
+            },
+            () => {
+              setIsLoading(false);
+              setError("No fue posible cargar usuarios desde Firebase.");
+            },
+          );
+          return;
+        }
         setIsLoading(false);
         setError("No fue posible cargar usuarios desde Firebase.");
       },
     );
 
+    return () => {
+      unsubscribe();
+      if (fallbackUnsubscribe) fallbackUnsubscribe();
+      if (retryUnsubscribe) retryUnsubscribe();
+    };
+  }, [user?.uid]);
+
+  useEffect(() => {
+    if (viewMode === "self") {
+      setAuditLogs([]);
+      setAuditError("");
+      return;
+    }
+
+    const unsubscribe = subscribeUserAuditLogs(
+      (items) => {
+        setAuditLogs(items);
+        setAuditError("");
+      },
+      () => {
+        setAuditError("No fue posible cargar la bitacora de auditoria.");
+      },
+    );
+
     return () => unsubscribe();
-  }, []);
+  }, [viewMode]);
 
   const filtered = useMemo(() => {
     const normalized = query.trim().toLowerCase();
@@ -54,6 +154,13 @@ export default function UsuariosPage() {
   }, [query, roleFilter, statusFilter, users]);
 
   useEffect(() => {
+    if (!pendingSelectId) return;
+    if (!users.some((item) => item.id === pendingSelectId)) return;
+    setSelectedId(pendingSelectId);
+    setPendingSelectId(null);
+  }, [pendingSelectId, users]);
+
+  useEffect(() => {
     if (!filtered.length) {
       setSelectedId("");
       return;
@@ -65,6 +172,8 @@ export default function UsuariosPage() {
   }, [filtered, selectedId]);
 
   const selected = filtered.find((user) => user.id === selectedId) ?? null;
+  const currentProfile = users.find((item) => item.id === currentUserId) ?? null;
+  const isSelfView = viewMode === "self";
 
   const counters = useMemo(() => {
     return users.reduce(
@@ -83,8 +192,13 @@ export default function UsuariosPage() {
     setActionError("");
     try {
       await run();
-    } catch {
-      setActionError("No se pudo completar la accion en Firebase.");
+    } catch (err) {
+      const raw = err instanceof Error ? err.message : "";
+      if (raw.includes("permission-denied") || raw.includes("PERMISSION_DENIED")) {
+        setActionError("No tienes permisos para ejecutar esta accion.");
+        return;
+      }
+      setActionError(raw || "No se pudo completar la accion en Firebase.");
     }
   }
 
@@ -96,7 +210,11 @@ export default function UsuariosPage() {
 
   function handleRoleChange(nextRole: AppUserRole) {
     if (!selected) return;
-    void withAction(() => updateUserRole(selected.id, nextRole));
+    setRoleVerification({
+      targetId: selected.id,
+      targetName: selected.fullName,
+      nextRole,
+    });
   }
 
   function handleCloseSessions() {
@@ -104,55 +222,82 @@ export default function UsuariosPage() {
     void withAction(() => closeUserSessions(selected.id));
   }
 
+  async function handleCreateUser(draft: {
+    fullName: string;
+    email: string;
+    password: string;
+    role: AppUserRole;
+    status: AppUserStatus;
+    site: string;
+  }) {
+    const alreadyExists = users.some((user) => user.email.toLowerCase() === draft.email.toLowerCase());
+    if (alreadyExists) {
+      throw new Error("Ya existe un usuario con ese correo en el panel.");
+    }
+
+    const newId = await createUserWithAuth(draft);
+    setPendingSelectId(newId);
+  }
+
   return (
     <section className="space-y-4">
-      <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
-        <MetricCard label="Usuarios activos" value={`${counters.active}`} tone="emerald" sub="Sesion habilitada" />
-        <MetricCard label="Usuarios inactivos" value={`${counters.inactive}`} tone="amber" sub="Sin actividad reciente" />
-        <MetricCard label="Bloqueados" value={`${counters.blocked}`} tone="rose" sub="Requieren revision" />
-        <MetricCard label="Operadores" value={`${counters.operators}`} tone="cyan" sub="Respuesta operativa" />
-      </div>
-
-      <div className="rounded-2xl border border-cyan-300/20 bg-slate-900/70 p-4 backdrop-blur">
-        <div className="grid gap-3 lg:grid-cols-[1.2fr_0.7fr_0.7fr_auto]">
-          <input
-            className="w-full rounded-xl border border-cyan-300/20 bg-slate-950/80 px-4 py-2.5 text-sm text-slate-100 outline-none placeholder:text-slate-400 focus:border-cyan-300 focus:ring-2 focus:ring-cyan-400/30"
-            placeholder="Buscar por nombre, correo, sede o ID..."
-            value={query}
-            onChange={(e) => setQuery(e.target.value)}
-          />
-
-          <select
-            className="rounded-xl border border-cyan-300/20 bg-slate-950/80 px-3 py-2.5 text-sm text-slate-100 outline-none focus:border-cyan-300 focus:ring-2 focus:ring-cyan-400/30"
-            value={statusFilter}
-            onChange={(e) => setStatusFilter(e.target.value as AppUserStatus | "Todos")}
-          >
-            <option value="Todos">Todos</option>
-            <option value="Activo">Activo</option>
-            <option value="Inactivo">Inactivo</option>
-            <option value="Bloqueado">Bloqueado</option>
-          </select>
-
-          <select
-            className="rounded-xl border border-cyan-300/20 bg-slate-950/80 px-3 py-2.5 text-sm text-slate-100 outline-none focus:border-cyan-300 focus:ring-2 focus:ring-cyan-400/30"
-            value={roleFilter}
-            onChange={(e) => setRoleFilter(e.target.value as AppUserRole | "Todos")}
-          >
-            <option value="Todos">Todos</option>
-            <option value="Admin">Admin</option>
-            <option value="Supervisor">Supervisor</option>
-            <option value="Operador">Operador</option>
-          </select>
-
-          <button
-            type="button"
-            className="rounded-xl border border-cyan-300/30 bg-cyan-400/10 px-4 py-2.5 text-sm font-semibold text-cyan-100"
-            title="La creacion de usuarios Auth requiere flujo administrativo (Cloud Function/Admin SDK)."
-          >
-            Nuevo usuario
-          </button>
+      {!isSelfView ? (
+        <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
+          <MetricCard label="Usuarios activos" value={`${counters.active}`} tone="emerald" sub="Sesion habilitada" />
+          <MetricCard label="Usuarios inactivos" value={`${counters.inactive}`} tone="amber" sub="Sin actividad reciente" />
+          <MetricCard label="Bloqueados" value={`${counters.blocked}`} tone="rose" sub="Requieren revision" />
+          <MetricCard label="Operadores" value={`${counters.operators}`} tone="cyan" sub="Respuesta operativa" />
         </div>
-      </div>
+      ) : (
+        <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-3">
+          <MetricCard label="Mi rol" value={currentProfile?.role ?? "-"} tone="cyan" sub="Perfil operativo actual" />
+          <MetricCard label="Estado de cuenta" value={currentProfile?.status ?? "-"} tone="emerald" sub="Control de acceso" />
+          <MetricCard label="Sesiones activas" value={`${currentProfile?.sessions ?? 0}`} tone="amber" sub="Dispositivos vinculados" />
+        </div>
+      )}
+
+      {!isSelfView && (
+        <div className="rounded-2xl border border-cyan-300/20 bg-slate-900/70 p-4 backdrop-blur">
+          <div className="grid gap-3 lg:grid-cols-[1.2fr_0.7fr_0.7fr_auto]">
+            <input
+              className="w-full rounded-xl border border-cyan-300/20 bg-slate-950/80 px-4 py-2.5 text-sm text-slate-100 outline-none placeholder:text-slate-400 focus:border-cyan-300 focus:ring-2 focus:ring-cyan-400/30"
+              placeholder="Buscar por nombre, correo, sede o ID..."
+              value={query}
+              onChange={(e) => setQuery(e.target.value)}
+            />
+
+            <select
+              className="rounded-xl border border-cyan-300/20 bg-slate-950/80 px-3 py-2.5 text-sm text-slate-100 outline-none focus:border-cyan-300 focus:ring-2 focus:ring-cyan-400/30"
+              value={statusFilter}
+              onChange={(e) => setStatusFilter(e.target.value as AppUserStatus | "Todos")}
+            >
+              <option value="Todos">Todos</option>
+              <option value="Activo">Activo</option>
+              <option value="Inactivo">Inactivo</option>
+              <option value="Bloqueado">Bloqueado</option>
+            </select>
+
+            <select
+              className="rounded-xl border border-cyan-300/20 bg-slate-950/80 px-3 py-2.5 text-sm text-slate-100 outline-none focus:border-cyan-300 focus:ring-2 focus:ring-cyan-400/30"
+              value={roleFilter}
+              onChange={(e) => setRoleFilter(e.target.value as AppUserRole | "Todos")}
+            >
+              <option value="Todos">Todos</option>
+              <option value="Admin">Admin</option>
+              <option value="Supervisor">Supervisor</option>
+              <option value="Operador">Operador</option>
+            </select>
+
+            <button
+              type="button"
+              onClick={() => setShowCreateModal(true)}
+              className="rounded-xl border border-cyan-300/30 bg-cyan-400/10 px-4 py-2.5 text-sm font-semibold text-cyan-100"
+            >
+              Nuevo usuario
+            </button>
+          </div>
+        </div>
+      )}
 
       {error && (
         <div className="rounded-xl border border-rose-400/30 bg-rose-500/10 px-4 py-3 text-sm text-rose-200">
@@ -166,7 +311,9 @@ export default function UsuariosPage() {
         </div>
       )}
 
-      <div className="grid gap-4 xl:grid-cols-[1fr_1.1fr_0.9fr]">
+      {!isSelfView ? (
+        <>
+        <div className="grid gap-4 xl:grid-cols-[1fr_1.1fr_0.9fr]">
         <article className="rounded-2xl border border-cyan-300/20 bg-slate-900/70 p-4 backdrop-blur">
           <h3 className="text-sm font-bold uppercase tracking-[0.16em] text-cyan-200">Usuarios registrados</h3>
 
@@ -176,6 +323,7 @@ export default function UsuariosPage() {
             ) : filtered.length ? (
               filtered.map((user) => {
                 const active = user.id === selectedId;
+                const isCurrentSession = user.id === currentUserId;
                 return (
                   <button
                     key={user.id}
@@ -184,7 +332,9 @@ export default function UsuariosPage() {
                     className={`w-full rounded-xl border p-3 text-left transition ${
                       active
                         ? "border-cyan-300/45 bg-cyan-400/10"
-                        : "border-slate-700 bg-slate-950/70 hover:border-cyan-300/30"
+                        : isCurrentSession
+                          ? "border-emerald-300/40 bg-emerald-400/10 hover:border-emerald-300/60"
+                          : "border-slate-700 bg-slate-950/70 hover:border-cyan-300/30"
                     }`}
                   >
                     <div className="flex items-start justify-between gap-2">
@@ -195,7 +345,14 @@ export default function UsuariosPage() {
                       <StatusTag status={user.status} />
                     </div>
                     <div className="mt-2 flex items-center justify-between text-xs text-slate-300">
-                      <span>{user.site}</span>
+                      <span className="inline-flex items-center gap-2">
+                        {user.site}
+                        {isCurrentSession && (
+                          <span className="rounded-full border border-emerald-300/35 bg-emerald-400/15 px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wide text-emerald-200">
+                            Sesion actual
+                          </span>
+                        )}
+                      </span>
                       <span>{user.id.slice(0, 10)}</span>
                     </div>
                   </button>
@@ -213,6 +370,11 @@ export default function UsuariosPage() {
           <h3 className="text-sm font-bold uppercase tracking-[0.16em] text-cyan-200">Perfil operativo</h3>
           {selected ? (
             <div className="mt-4 space-y-4">
+              {selected.id === currentUserId && (
+                <div className="rounded-xl border border-emerald-300/30 bg-emerald-400/10 px-3 py-2 text-xs font-semibold uppercase tracking-[0.15em] text-emerald-200">
+                  Perfil en uso actualmente
+                </div>
+              )}
               <div className="rounded-xl border border-cyan-300/20 bg-slate-950/70 p-3">
                 <p className="text-xs uppercase tracking-[0.14em] text-slate-400">Usuario seleccionado</p>
                 <p className="mt-2 text-lg font-black text-white">{selected.fullName}</p>
@@ -294,56 +456,130 @@ export default function UsuariosPage() {
           </div>
         </article>
       </div>
+      <article className="rounded-2xl border border-cyan-300/20 bg-slate-900/70 p-4 backdrop-blur">
+        <h3 className="text-sm font-bold uppercase tracking-[0.16em] text-cyan-200">Bitacora de auditoria</h3>
+        {auditError ? (
+          <p className="mt-4 rounded-xl border border-rose-400/30 bg-rose-500/10 p-3 text-sm text-rose-200">{auditError}</p>
+        ) : auditLogs.length ? (
+          <div className="mt-4 space-y-2">
+            {auditLogs.map((log) => (
+              <div key={log.id} className="rounded-xl border border-slate-700 bg-slate-950/70 p-3">
+                <div className="flex flex-wrap items-center justify-between gap-2">
+                  <p className="text-sm font-semibold text-slate-100">{formatAuditAction(log.action)}</p>
+                  <span className="text-xs text-slate-400">{log.createdAt}</span>
+                </div>
+                <p className="mt-1 text-xs text-slate-300">
+                  Actor: {log.actorName} ({log.actorRole}) | Afectado: {log.targetName}
+                </p>
+              </div>
+            ))}
+          </div>
+        ) : (
+          <p className="mt-4 rounded-xl border border-slate-700 bg-slate-950/70 p-3 text-sm text-slate-300">
+            Sin eventos de auditoria por ahora.
+          </p>
+        )}
+      </article>
+      </>
+      ) : (
+        <div className="grid gap-4 xl:grid-cols-[1.1fr_0.9fr]">
+          <article className="rounded-2xl border border-cyan-300/20 bg-slate-900/70 p-4 backdrop-blur">
+            <h3 className="text-sm font-bold uppercase tracking-[0.16em] text-cyan-200">Mi perfil</h3>
+            {currentProfile ? (
+              <div className="mt-4 space-y-4">
+                <div className="rounded-xl border border-emerald-300/30 bg-emerald-400/10 px-3 py-2 text-xs font-semibold uppercase tracking-[0.15em] text-emerald-200">
+                  Sesion actual
+                </div>
+                <div className="rounded-xl border border-cyan-300/20 bg-slate-950/70 p-3">
+                  <p className="text-xs uppercase tracking-[0.14em] text-slate-400">Usuario autenticado</p>
+                  <p className="mt-2 text-lg font-black text-white">{currentProfile.fullName}</p>
+                  <p className="mt-1 text-sm text-slate-300">{currentProfile.email}</p>
+                </div>
+                <div className="grid gap-2">
+                  <DetailRow label="ID" value={currentProfile.id} />
+                  <DetailRow label="Rol" value={currentProfile.role} />
+                  <DetailRow label="Estado" value={currentProfile.status} />
+                  <DetailRow label="Sede/Zona" value={currentProfile.site} />
+                  <DetailRow label="Ultimo acceso" value={currentProfile.lastAccess} />
+                  <DetailRow label="Sesiones activas" value={`${currentProfile.sessions}`} />
+                </div>
+              </div>
+            ) : (
+              <p className="mt-4 rounded-xl border border-slate-700 bg-slate-950/70 p-3 text-sm text-slate-300">
+                No se pudo cargar tu perfil.
+              </p>
+            )}
+          </article>
+
+          <article className="rounded-2xl border border-cyan-300/20 bg-slate-900/70 p-4 backdrop-blur">
+            <h3 className="text-sm font-bold uppercase tracking-[0.16em] text-cyan-200">Permisos de tu rol</h3>
+            <div className="mt-4 space-y-3">
+              <div className="rounded-xl border border-cyan-300/20 bg-slate-950/70 p-3 text-sm text-slate-300">
+                Puedes consultar y mantener tu propio perfil operativo.
+              </div>
+              <div className="rounded-xl border border-slate-700 bg-slate-950/70 p-3 text-sm text-slate-300">
+                No tienes acceso a la administracion global de usuarios.
+              </div>
+              <div className="rounded-xl border border-amber-300/30 bg-amber-500/10 p-3 text-sm text-amber-200">
+                Solicita a un Admin o Supervisor cualquier cambio de rol o estado.
+              </div>
+            </div>
+          </article>
+        </div>
+      )}
+
+      {showCreateModal && (
+        <CreateUserModal
+          onClose={() => setShowCreateModal(false)}
+          onCreate={async (draft) => {
+            await handleCreateUser(draft);
+            setShowCreateModal(false);
+          }}
+        />
+      )}
+
+      {roleVerification && (
+        <RoleVerificationModal
+          targetName={roleVerification.targetName}
+          nextRole={roleVerification.nextRole}
+          onClose={() => setRoleVerification(null)}
+          onConfirm={async (password) => {
+            const current = roleVerification;
+            if (!current) {
+              throw new Error("No se encontro la operacion a validar.");
+            }
+            if (!user || !user.email) {
+              throw new Error("No se pudo validar la sesion del administrador.");
+            }
+
+            const credential = EmailAuthProvider.credential(user.email, password);
+            try {
+              await reauthenticateWithCredential(user, credential);
+            } catch (err) {
+              const raw = err instanceof Error ? err.message : "";
+              if (raw.includes("auth/invalid-credential") || raw.includes("auth/wrong-password")) {
+                throw new Error("Contrasena incorrecta.");
+              }
+              throw new Error("No se pudo verificar tu identidad.");
+            }
+
+            try {
+              await updateUserRole(current.targetId, current.nextRole);
+              setActionError("");
+              setRoleVerification(null);
+            } catch (err) {
+              const raw = err instanceof Error ? err.message : "";
+              if (raw.includes("failed-precondition")) {
+                throw new Error("Verificacion vencida. Intenta nuevamente.");
+              }
+              if (raw.includes("permission-denied") || raw.includes("PERMISSION_DENIED")) {
+                throw new Error("No tienes permisos para cambiar roles.");
+              }
+              throw new Error("No se pudo completar el cambio de rol.");
+            }
+          }}
+        />
+      )}
     </section>
-  );
-}
-
-function MetricCard({
-  label,
-  value,
-  sub,
-  tone,
-}: {
-  label: string;
-  value: string;
-  sub: string;
-  tone: "emerald" | "amber" | "rose" | "cyan";
-}) {
-  const toneClass: Record<typeof tone, string> = {
-    emerald: "border-emerald-300/25 bg-emerald-400/10 text-emerald-200",
-    amber: "border-amber-300/25 bg-amber-400/10 text-amber-200",
-    rose: "border-rose-300/25 bg-rose-400/10 text-rose-200",
-    cyan: "border-cyan-300/25 bg-cyan-400/10 text-cyan-200",
-  };
-
-  return (
-    <article className="rounded-2xl border border-cyan-300/20 bg-slate-900/70 p-4 backdrop-blur">
-      <p className="text-xs uppercase tracking-[0.16em] text-slate-300">{label}</p>
-      <div className="mt-3 flex items-center justify-between gap-2">
-        <p className="text-3xl font-black text-white">{value}</p>
-        <span className={`rounded-full border px-2.5 py-1 text-[11px] font-semibold ${toneClass[tone]}`}>Live</span>
-      </div>
-      <p className="mt-2 text-xs text-slate-300">{sub}</p>
-    </article>
-  );
-}
-
-function StatusTag({ status }: { status: AppUserStatus }) {
-  const cls =
-    status === "Activo"
-      ? "border-emerald-300/30 bg-emerald-400/10 text-emerald-200"
-      : status === "Inactivo"
-        ? "border-amber-300/30 bg-amber-400/10 text-amber-200"
-        : "border-rose-300/30 bg-rose-400/10 text-rose-200";
-
-  return <span className={`rounded-full border px-2.5 py-1 text-[11px] font-semibold ${cls}`}>{status}</span>;
-}
-
-function DetailRow({ label, value }: { label: string; value: string }) {
-  return (
-    <div className="flex items-center justify-between gap-3 rounded-xl border border-slate-700 bg-slate-950/70 px-3 py-2">
-      <span className="text-xs uppercase tracking-[0.14em] text-slate-400">{label}</span>
-      <span className="text-sm font-semibold text-slate-100">{value}</span>
-    </div>
   );
 }

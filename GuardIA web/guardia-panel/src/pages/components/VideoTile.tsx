@@ -1,10 +1,12 @@
 ﻿import Badge from "../../UI/Badge";
 import IconButton from "../../UI/IconButton";
+import CameraStream from "./CameraStream";
 
 export type Camera = {
   id: string;
   name: string;
   location: string;
+  streamUrl?: string;
   status: "live" | "offline";
   latencyMs: number;
   lastSeen: string;
@@ -38,6 +40,7 @@ export default function VideoTile({
       </header>
 
       <div className="relative mt-3 h-44 overflow-hidden rounded-xl border border-cyan-300/15 bg-slate-950">
+        <CameraStream streamUrl={cam.streamUrl} isPlaying={isPlaying} offline={offline} fit="cover" />
         <div className="absolute inset-0 bg-[radial-gradient(circle_at_30%_30%,rgba(34,211,238,0.25),transparent_55%)]" />
         <div className="absolute inset-0 bg-[linear-gradient(to_bottom,transparent,rgba(2,6,23,0.7))]" />
         {isPlaying && !offline && (

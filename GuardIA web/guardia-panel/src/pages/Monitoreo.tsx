@@ -14,6 +14,7 @@ const INITIAL_CAMERAS: Camera[] = [
     lastSeen: "11:06",
     recording: true,
     sensitivity: 64,
+    streamUrl: "http://admin:admin@192.168.100.145:8081/video",
   },
   {
     id: "c2",
@@ -24,6 +25,7 @@ const INITIAL_CAMERAS: Camera[] = [
     lastSeen: "11:08",
     recording: true,
     sensitivity: 70,
+    streamUrl: "",
   },
   {
     id: "c3",
@@ -34,6 +36,7 @@ const INITIAL_CAMERAS: Camera[] = [
     lastSeen: "11:07",
     recording: false,
     sensitivity: 55,
+    streamUrl: "",
   },
   {
     id: "c4",
@@ -44,6 +47,7 @@ const INITIAL_CAMERAS: Camera[] = [
     lastSeen: "10:42",
     recording: false,
     sensitivity: 48,
+    streamUrl: "",
   },
 ];
 
@@ -88,7 +92,7 @@ export default function Monitoreo() {
     setPlaying((prev) => ({ ...prev, [cameraId]: !prev[cameraId] }));
   }
 
-  function handleSaveConfig(patch: Pick<Camera, "recording" | "sensitivity" | "status">) {
+  function handleSaveConfig(patch: Pick<Camera, "recording" | "sensitivity" | "status" | "streamUrl">) {
     if (!configId) return;
 
     setCameras((prev) =>
