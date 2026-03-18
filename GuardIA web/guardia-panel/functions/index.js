@@ -182,9 +182,11 @@ function buildOtpEmailTemplate({ displayName, code }) {
 async function sendOtpEmail({ to, displayName, code }) {
   const apiKey = functions.config().guardia_mail?.api_key || "";
   const from = functions.config().guardia_mail?.from || "";
+  const allowDebugFallback = String(process.env.FUNCTIONS_EMULATOR || "").toLowerCase() === "true"
+    || String(process.env.GUARDIA_ALLOW_EMAIL_DEBUG_FALLBACK || "true").toLowerCase() === "true";
 
   if (!apiKey || !from) {
-    if (process.env.FUNCTIONS_EMULATOR === "true") {
+    if (allowDebugFallback) {
       console.log("[GuardIA OTP][EMULATOR]", { to, code });
       return { debugCode: code };
     }
@@ -209,6 +211,21 @@ async function sendOtpEmail({ to, displayName, code }) {
   });
 
   if (!response.ok) {
+    const responseText = await response.text();
+    console.error("[GuardIA OTP][RESEND_ERROR]", {
+      status: response.status,
+      to,
+      from,
+      responseText,
+    });
+
+    if (allowDebugFallback) {
+      return {
+        debugCode: code,
+        warning: "fallback_debug_code",
+      };
+    }
+
     throw new functions.https.HttpsError("internal", "No fue posible enviar el correo de verificacion.");
   }
 
