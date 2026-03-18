@@ -1,7 +1,8 @@
 import type { User } from "firebase/auth";
 import { httpsCallable } from "firebase/functions";
-import { collection, doc, getDoc, increment, limit, onSnapshot, orderBy, query, runTransaction, serverTimestamp, setDoc, type Unsubscribe } from "firebase/firestore";
+import { doc, getDoc, increment, runTransaction, serverTimestamp, setDoc, type Unsubscribe } from "firebase/firestore";
 import { firebaseDb, firebaseFunctions } from "../lib/firebase";
+import { apiGet, apiSend } from "./apiClient";
 
 export type AppUserRole = "Admin" | "Operador" | "Supervisor";
 export type AppUserStatus = "Activo" | "Inactivo" | "Bloqueado";
@@ -30,8 +31,6 @@ type FirestoreUserDoc = {
 };
 
 const USERS_COLLECTION = "usuarios";
-const USER_AUDIT_COLLECTION = "auditoria_usuarios";
-
 export type UserAuditRecord = {
   id: string;
   action: string;
@@ -67,21 +66,60 @@ function formatAuditDate(value?: { toDate?: () => Date } | null) {
   return value.toDate().toLocaleString("es-CO", { hour: "2-digit", minute: "2-digit", day: "2-digit", month: "2-digit" });
 }
 
+async function fetchUsers() {
+  const response = await apiGet<{ items: AppUserRecord[] }>("/users");
+  return response.items;
+}
+
+async function fetchUserById(userId: string) {
+  const response = await apiGet<{ item: AppUserRecord }>(`/users/${userId}`);
+  return response.item;
+}
+
+async function fetchRecentAuditLogs() {
+  const response = await apiGet<{ items: UserAuditRecord[] }>("/audit/users?limit=5");
+  return response.items;
+}
+
+async function createUserProfileInApi(input: {
+  firebaseUid: string;
+  fullName: string;
+  email: string;
+  role: AppUserRole;
+  status: AppUserStatus;
+  site: string;
+}) {
+  const roleMap: Record<AppUserRole, "admin" | "supervisor" | "operador"> = {
+    Admin: "admin",
+    Supervisor: "supervisor",
+    Operador: "operador",
+  };
+
+  const statusMap: Record<AppUserStatus, "activo" | "inactivo" | "bloqueado"> = {
+    Activo: "activo",
+    Inactivo: "inactivo",
+    Bloqueado: "bloqueado",
+  };
+
+  return apiSend<{ ok: boolean; firebaseUid: string }>("/users", {
+    method: "POST",
+    body: JSON.stringify({
+      firebaseUid: input.firebaseUid,
+      fullName: input.fullName.trim(),
+      email: input.email.trim().toLowerCase(),
+      role: roleMap[input.role],
+      status: statusMap[input.status],
+      site: input.site.trim(),
+    }),
+  });
+}
+
 export function subscribeUsers(
   onData: (items: AppUserRecord[]) => void,
   onError: (error: unknown) => void,
 ): Unsubscribe {
-  const usersRef = collection(firebaseDb, USERS_COLLECTION);
-  const usersQuery = query(usersRef, orderBy("displayName"));
-
-  return onSnapshot(
-    usersQuery,
-    (snapshot) => {
-      const users = snapshot.docs.map((docItem) => toRecord(docItem.id, docItem.data() as FirestoreUserDoc));
-      onData(users);
-    },
-    onError,
-  );
+  void fetchUsers().then(onData).catch(onError);
+  return () => undefined;
 }
 
 export function subscribeCurrentUser(
@@ -89,55 +127,19 @@ export function subscribeCurrentUser(
   onData: (items: AppUserRecord[]) => void,
   onError: (error: unknown) => void,
 ): Unsubscribe {
-  const userRef = doc(firebaseDb, USERS_COLLECTION, userId);
-  return onSnapshot(
-    userRef,
-    (snap) => {
-      if (!snap.exists()) {
-        onData([]);
-        return;
-      }
-      onData([toRecord(snap.id, snap.data() as FirestoreUserDoc)]);
-    },
-    onError,
-  );
+  void fetchUserById(userId)
+    .then((item) => onData(item ? [item] : []))
+    .catch(onError);
+
+  return () => undefined;
 }
 
 export function subscribeUserAuditLogs(
   onData: (items: UserAuditRecord[]) => void,
   onError: (error: unknown) => void,
 ): Unsubscribe {
-  const logsRef = collection(firebaseDb, USER_AUDIT_COLLECTION);
-  const logsQuery = query(logsRef, orderBy("createdAt", "desc"), limit(12));
-
-  return onSnapshot(
-    logsQuery,
-    (snapshot) => {
-      const items = snapshot.docs.map((item) => {
-        const data = item.data() as {
-          action?: string;
-          actorUid?: string;
-          actorName?: string;
-          actorRole?: AppUserRole;
-          targetUid?: string;
-          targetName?: string;
-          createdAt?: { toDate?: () => Date } | null;
-        };
-        return {
-          id: item.id,
-          action: data.action ?? "unknown",
-          actorUid: data.actorUid ?? "-",
-          actorName: data.actorName ?? "Sin nombre",
-          actorRole: data.actorRole ?? "Desconocido",
-          targetUid: data.targetUid ?? "-",
-          targetName: data.targetName ?? "Sin nombre",
-          createdAt: formatAuditDate(data.createdAt ?? null),
-        };
-      });
-      onData(items);
-    },
-    onError,
-  );
+  void fetchRecentAuditLogs().then(onData).catch(onError);
+  return () => undefined;
 }
 
 export async function ensureUserProfile(user: User) {
@@ -226,27 +228,36 @@ export async function registerUserLogout(user: User) {
 }
 
 export async function updateUserRole(userId: string, role: AppUserRole) {
-  const callable = httpsCallable<{ targetUid: string; role: AppUserRole }, { ok: boolean }>(
-    firebaseFunctions,
-    "updateUserRole",
-  );
-  await callable({ targetUid: userId, role });
+  const roleMap: Record<AppUserRole, "admin" | "supervisor" | "operador"> = {
+    Admin: "admin",
+    Supervisor: "supervisor",
+    Operador: "operador",
+  };
+
+  await apiSend<{ ok: boolean }>(`/users/${userId}/role`, {
+    method: "PATCH",
+    body: JSON.stringify({ role: roleMap[role] }),
+  });
 }
 
 export async function updateUserStatus(userId: string, status: AppUserStatus) {
-  const callable = httpsCallable<{ targetUid: string; status: AppUserStatus }, { ok: boolean }>(
-    firebaseFunctions,
-    "updateUserStatus",
-  );
-  await callable({ targetUid: userId, status });
+  const statusMap: Record<AppUserStatus, "activo" | "inactivo" | "bloqueado"> = {
+    Activo: "activo",
+    Inactivo: "inactivo",
+    Bloqueado: "bloqueado",
+  };
+
+  await apiSend<{ ok: boolean }>(`/users/${userId}/status`, {
+    method: "PATCH",
+    body: JSON.stringify({ status: statusMap[status] }),
+  });
 }
 
 export async function closeUserSessions(userId: string) {
-  const callable = httpsCallable<{ targetUid: string }, { ok: boolean }>(
-    firebaseFunctions,
-    "closeUserSessions",
-  );
-  await callable({ targetUid: userId });
+  await apiSend<{ ok: boolean }>(`/users/${userId}/close-sessions`, {
+    method: "POST",
+    body: JSON.stringify({}),
+  });
 }
 
 export async function createUserWithAuth(input: {
@@ -276,6 +287,15 @@ export async function createUserWithAuth(input: {
     appRole: input.role,
     status: input.status,
     site: input.site.trim(),
+  });
+
+  await createUserProfileInApi({
+    firebaseUid: response.data.uid,
+    fullName: input.fullName,
+    email: input.email,
+    role: input.role,
+    status: input.status,
+    site: input.site,
   });
 
   return response.data.uid;

@@ -16,34 +16,161 @@ const packets = [
 ];
 
 export default function Login() {
-  const { login, isAuthenticated, isAuthReady } = useAuth();
+  const {
+    login,
+    beginEmailSecondFactor,
+    verifyEmailSecondFactor,
+    sendResetPassword,
+    isAuthenticated,
+    isAuthReady,
+    isSecondFactorVerified,
+  } = useAuth();
   const navigate = useNavigate();
 
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
+  const [rememberMe, setRememberMe] = useState(false);
+  const [otpCode, setOtpCode] = useState("");
+  const [step, setStep] = useState<"credentials" | "otp" | "recovery">("credentials");
   const [error, setError] = useState("");
+  const [info, setInfo] = useState("");
+  const [recoveryStatus, setRecoveryStatus] = useState<"idle" | "sent">("idle");
+  const [otpDebugCode, setOtpDebugCode] = useState("");
+  const [otpExpiresIn, setOtpExpiresIn] = useState(0);
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [pointer, setPointer] = useState({ x: 50, y: 50 });
+  const stepMeta = {
+    credentials: {
+      eyebrow: "Secure Access",
+      title: "GuardIA Panel",
+      description: "Inicia sesion para continuar con el monitoreo inteligente.",
+      accent: "Acceso primario",
+      progress: "34%",
+    },
+    recovery: {
+      eyebrow: "Recovery Protocol",
+      title: "Recuperar acceso",
+      description: "Restablece tu contrasena desde un flujo guiado y seguro.",
+      accent: "Recuperacion activa",
+      progress: "68%",
+    },
+    otp: {
+      eyebrow: "Second Factor",
+      title: "Validacion por correo",
+      description: "Confirma tu identidad con el codigo temporal enviado al correo registrado.",
+      accent: "Verificacion final",
+      progress: "100%",
+    },
+  }[step];
 
   useEffect(() => {
-    if (isAuthReady && isAuthenticated) {
+    const savedEmail = window.localStorage.getItem("guardia-remember-email");
+    if (savedEmail) {
+      setEmail(savedEmail);
+      setRememberMe(true);
+    }
+  }, []);
+
+  useEffect(() => {
+    if (isAuthReady && isAuthenticated && isSecondFactorVerified) {
       navigate("/dashboard", { replace: true });
     }
-  }, [isAuthenticated, isAuthReady, navigate]);
+  }, [isAuthenticated, isAuthReady, isSecondFactorVerified, navigate]);
+
+  useEffect(() => {
+    if (isAuthenticated && !isSecondFactorVerified) {
+      setStep("otp");
+    }
+  }, [isAuthenticated, isSecondFactorVerified]);
+
+  useEffect(() => {
+    if (!otpExpiresIn) return;
+    const timer = window.setTimeout(() => setOtpExpiresIn((current) => Math.max(0, current - 1)), 1000);
+    return () => window.clearTimeout(timer);
+  }, [otpExpiresIn]);
 
   async function handleSubmit(e: React.FormEvent) {
     e.preventDefault();
     setError("");
+    setInfo("");
     setIsSubmitting(true);
 
     const result = await login(email, password);
-    setIsSubmitting(false);
 
     if (result.ok) {
-      navigate("/dashboard");
+      if (rememberMe) {
+        window.localStorage.setItem("guardia-remember-email", email.trim());
+      } else {
+        window.localStorage.removeItem("guardia-remember-email");
+      }
+
+      const otpResult = await beginEmailSecondFactor();
+      setIsSubmitting(false);
+
+      if (!otpResult.ok) {
+        setError(otpResult.message ?? "No se pudo enviar el codigo de verificacion.");
+        return;
+      }
+
+      setOtpDebugCode(otpResult.debugCode ?? "");
+      setOtpExpiresIn(otpResult.expiresInSeconds ?? 300);
+      setInfo(otpResult.message ?? "Te enviamos un codigo al correo registrado.");
+      setStep("otp");
     } else {
+      setIsSubmitting(false);
       setError(result.message ?? "Credenciales incorrectas");
     }
+  }
+
+  async function handleForgotPassword() {
+    setError("");
+    setInfo("");
+    setRecoveryStatus("idle");
+    setStep("recovery");
+  }
+
+  async function handleSendRecovery(e: React.FormEvent) {
+    e.preventDefault();
+    setError("");
+    setInfo("");
+    setIsSubmitting(true);
+    const result = await sendResetPassword(email);
+    setIsSubmitting(false);
+    if (result.ok) {
+      setInfo(result.message ?? "Correo de recuperacion enviado.");
+      setRecoveryStatus("sent");
+      return;
+    }
+    setError(result.message ?? "No fue posible recuperar la cuenta.");
+  }
+
+  async function handleVerifyOtp(e: React.FormEvent) {
+    e.preventDefault();
+    setError("");
+    setInfo("");
+    setIsSubmitting(true);
+    const result = await verifyEmailSecondFactor(otpCode.trim());
+    setIsSubmitting(false);
+    if (result.ok) {
+      navigate("/dashboard", { replace: true });
+      return;
+    }
+    setError(result.message ?? "No se pudo validar el codigo.");
+  }
+
+  async function handleResendOtp() {
+    setError("");
+    setInfo("");
+    setIsSubmitting(true);
+    const result = await beginEmailSecondFactor();
+    setIsSubmitting(false);
+    if (!result.ok) {
+      setError(result.message ?? "No se pudo reenviar el codigo.");
+      return;
+    }
+    setOtpDebugCode(result.debugCode ?? "");
+    setOtpExpiresIn(result.expiresInSeconds ?? 300);
+    setInfo(result.message ?? "Te enviamos un nuevo codigo.");
   }
 
   function handleMouseMove(e: MouseEvent<HTMLDivElement>) {
@@ -56,7 +183,7 @@ export default function Login() {
 
   return (
     <div
-      className="relative min-h-screen overflow-hidden bg-slate-950 px-4 py-10 sm:px-6 lg:px-8"
+      className="relative flex h-screen items-center overflow-hidden bg-slate-950 px-4 py-4 sm:px-6 lg:px-8"
       onMouseMove={handleMouseMove}
       onMouseLeave={() => setPointer({ x: 50, y: 50 })}
     >
@@ -98,6 +225,16 @@ export default function Login() {
           50% { transform: translateY(-18px) scale(1); opacity: 0.8; }
           90% { opacity: 0.4; }
           100% { transform: translateY(-30px) scale(0.72); opacity: 0; }
+        }
+
+        @keyframes guardiaPanelEnter {
+          0% { opacity: 0; transform: translateY(10px) scale(0.985); }
+          100% { opacity: 1; transform: translateY(0) scale(1); }
+        }
+
+        @keyframes guardiaProgressPulse {
+          0%, 100% { box-shadow: 0 0 0 rgba(34,211,238,0.18); }
+          50% { box-shadow: 0 0 18px rgba(34,211,238,0.3); }
         }
       `}</style>
 
@@ -173,24 +310,43 @@ export default function Login() {
       </div>
 
       <div className="relative z-20 mx-auto w-full max-w-6xl">
-        <section className="relative z-30 mx-auto w-full max-w-md rounded-3xl border border-cyan-300/20 bg-slate-900/80 p-7 shadow-[0_20px_70px_rgba(8,47,73,0.6)] backdrop-blur md:p-8">
-          <div className="mb-6 flex items-center justify-between">
+        <section
+          className="relative z-30 mx-auto w-full max-w-md overflow-hidden rounded-3xl border border-cyan-300/20 bg-slate-900/80 p-6 shadow-[0_20px_70px_rgba(8,47,73,0.6)] backdrop-blur md:p-7"
+          style={{ animation: "guardiaPanelEnter 420ms ease-out" }}
+        >
+          <div className="absolute inset-x-0 top-0 h-px bg-gradient-to-r from-transparent via-cyan-300/70 to-transparent" />
+
+          <div className="mb-5 flex items-center justify-between">
             <div>
-              <p className="text-xs font-semibold uppercase tracking-[0.2em] text-cyan-200/90">
-                Secure Access
-              </p>
-              <h2 className="mt-2 text-3xl font-black text-white">GuardIA Panel</h2>
+              <p className="text-xs font-semibold uppercase tracking-[0.2em] text-cyan-200/90">{stepMeta.eyebrow}</p>
+              <h2 className="mt-2 text-3xl font-black text-white">{stepMeta.title}</h2>
             </div>
-            <div className="rounded-2xl border border-cyan-300/30 bg-cyan-400/10 p-3">
+            <div className="rounded-2xl border border-cyan-300/30 bg-cyan-400/10 p-3 shadow-[0_0_20px_rgba(34,211,238,0.12)]">
               <div className="h-6 w-6 rounded-full bg-cyan-300 shadow-[0_0_16px_rgba(103,232,249,0.9)]" />
             </div>
           </div>
 
-          <p className="mb-6 text-sm text-slate-300">
-            Inicia sesion para continuar con el monitoreo inteligente.
-          </p>
+          <div className="mb-6 rounded-2xl border border-white/10 bg-slate-950/45 p-4">
+            <div className="flex items-center justify-between gap-3">
+              <p className="text-sm text-slate-300">{stepMeta.description}</p>
+              <span className="rounded-full border border-cyan-300/25 bg-cyan-400/10 px-2.5 py-1 text-[11px] font-semibold text-cyan-100">
+                {stepMeta.accent}
+              </span>
+            </div>
+            <div className="mt-3 h-1.5 overflow-hidden rounded-full bg-white/5">
+              <div
+                className="h-full rounded-full bg-gradient-to-r from-cyan-400 via-sky-400 to-emerald-400 transition-all duration-500"
+                style={{
+                  width: stepMeta.progress,
+                  animation: "guardiaProgressPulse 2.8s ease-in-out infinite",
+                }}
+              />
+            </div>
+          </div>
 
-          <form onSubmit={handleSubmit} className="grid gap-4">
+          <div className="relative overflow-hidden">
+          {step === "credentials" ? (
+          <form key="credentials" onSubmit={handleSubmit} className="grid gap-4 transition-all duration-300">
             <label className="grid gap-2">
               <span className="text-xs font-semibold uppercase tracking-widest text-slate-300">
                 Correo
@@ -219,9 +375,35 @@ export default function Login() {
               />
             </label>
 
+            <div className="flex items-center justify-between gap-3">
+              <label className="inline-flex items-center gap-2 text-sm text-slate-300">
+                <input
+                  type="checkbox"
+                  checked={rememberMe}
+                  onChange={(e) => setRememberMe(e.target.checked)}
+                  className="h-4 w-4 rounded border border-slate-600 bg-slate-950 text-cyan-400 focus:ring-cyan-400/40"
+                />
+                Recuérdame
+              </label>
+
+              <button
+                type="button"
+                onClick={handleForgotPassword}
+                className="text-sm font-semibold text-cyan-200 transition hover:text-white"
+              >
+                Olvide mi contrasena
+              </button>
+            </div>
+
             {error && (
               <div className="rounded-xl border border-rose-400/30 bg-rose-500/10 px-4 py-2 text-center text-sm text-rose-200">
                 {error}
+              </div>
+            )}
+
+            {info && (
+              <div className="rounded-xl border border-emerald-400/30 bg-emerald-500/10 px-4 py-2 text-center text-sm text-emerald-200">
+                {info}
               </div>
             )}
 
@@ -233,6 +415,155 @@ export default function Login() {
               {isSubmitting ? "Validando..." : "Iniciar sesion segura"}
             </button>
           </form>
+          ) : step === "recovery" ? (
+          <form key="recovery" onSubmit={handleSendRecovery} className="grid gap-4 transition-all duration-300">
+            <div className="rounded-2xl border border-cyan-300/20 bg-slate-950/70 p-4">
+              <div className="flex items-start justify-between gap-3">
+                <div>
+                  <p className="text-xs uppercase tracking-[0.16em] text-cyan-200">Recuperacion de acceso</p>
+                  <p className="mt-2 text-sm text-slate-300">
+                    Enviaremos un enlace seguro para restablecer tu contrasena.
+                  </p>
+                </div>
+                <span className="rounded-full border border-amber-300/25 bg-amber-400/10 px-2.5 py-1 text-[11px] font-semibold text-amber-200">
+                  Cuenta protegida
+                </span>
+              </div>
+            </div>
+
+            <label className="grid gap-2">
+              <span className="text-xs font-semibold uppercase tracking-widest text-slate-300">
+                Correo registrado
+              </span>
+              <input
+                type="email"
+                placeholder="correo@empresa.com"
+                className="rounded-xl border border-slate-700 bg-slate-950/80 px-4 py-3 text-slate-100 outline-none transition focus:border-cyan-300 focus:ring-2 focus:ring-cyan-400/30"
+                value={email}
+                onChange={(e) => setEmail(e.target.value)}
+                required
+              />
+            </label>
+
+            {recoveryStatus === "sent" ? (
+              <div className="rounded-2xl border border-emerald-400/30 bg-emerald-500/10 p-4">
+                <p className="text-sm font-semibold text-emerald-200">Enlace enviado</p>
+                <p className="mt-1 text-sm text-emerald-100/90">
+                  Revisa tu bandeja de entrada y tambien spam. Cuando termines, vuelve para iniciar sesion.
+                </p>
+              </div>
+            ) : null}
+
+            {error && (
+              <div className="rounded-xl border border-rose-400/30 bg-rose-500/10 px-4 py-2 text-center text-sm text-rose-200">
+                {error}
+              </div>
+            )}
+
+            {info && (
+              <div className="rounded-xl border border-emerald-400/30 bg-emerald-500/10 px-4 py-2 text-center text-sm text-emerald-200">
+                {info}
+              </div>
+            )}
+
+            <div className="grid gap-2 sm:grid-cols-2">
+              <button
+                type="button"
+                onClick={() => {
+                  setStep("credentials");
+                  setRecoveryStatus("idle");
+                  setError("");
+                  setInfo("");
+                }}
+                className="rounded-xl border border-white/15 px-4 py-3 text-sm font-semibold text-slate-200 transition hover:bg-white/5"
+              >
+                Volver al acceso
+              </button>
+              <button
+                type="submit"
+                disabled={isSubmitting}
+                className="rounded-xl bg-gradient-to-r from-cyan-500 to-emerald-500 py-3 font-semibold text-slate-950 transition hover:brightness-110 disabled:cursor-not-allowed disabled:opacity-70"
+              >
+                {isSubmitting ? "Enviando..." : "Enviar enlace seguro"}
+              </button>
+            </div>
+          </form>
+          ) : (
+          <form key="otp" onSubmit={handleVerifyOtp} className="grid gap-4 transition-all duration-300">
+            <div className="rounded-2xl border border-cyan-300/20 bg-slate-950/70 p-4">
+              <div className="flex flex-wrap items-center justify-between gap-2">
+                <p className="text-xs uppercase tracking-[0.16em] text-cyan-200">Segundo factor por correo</p>
+                <span className="rounded-full border border-white/10 bg-white/5 px-2.5 py-1">
+                  Expira en {Math.floor(otpExpiresIn / 60)}:{String(otpExpiresIn % 60).padStart(2, "0")}
+                </span>
+              </div>
+              {otpDebugCode ? (
+                <div className="mt-3 rounded-xl border border-amber-300/25 bg-amber-400/10 px-3 py-2 text-xs text-amber-200">
+                  Debug: {otpDebugCode}
+                </div>
+              ) : null}
+            </div>
+
+            <label className="grid gap-2">
+              <span className="text-xs font-semibold uppercase tracking-widest text-slate-300">
+                Codigo de acceso
+              </span>
+              <input
+                inputMode="numeric"
+                maxLength={6}
+                placeholder="000000"
+                className="rounded-xl border border-slate-700 bg-slate-950/80 px-4 py-3 text-center text-2xl tracking-[0.4em] text-slate-100 outline-none transition focus:border-cyan-300 focus:ring-2 focus:ring-cyan-400/30"
+                value={otpCode}
+                onChange={(e) => setOtpCode(e.target.value.replace(/\D/g, "").slice(0, 6))}
+                required
+              />
+            </label>
+
+            {error && (
+              <div className="rounded-xl border border-rose-400/30 bg-rose-500/10 px-4 py-2 text-center text-sm text-rose-200">
+                {error}
+              </div>
+            )}
+
+            {info && (
+              <div className="rounded-xl border border-emerald-400/30 bg-emerald-500/10 px-4 py-2 text-center text-sm text-emerald-200">
+                {info}
+              </div>
+            )}
+
+            <div className="grid gap-2 sm:grid-cols-2">
+              <button
+                type="button"
+                onClick={() => {
+                  setStep("credentials");
+                  setOtpCode("");
+                  setError("");
+                  setInfo("");
+                }}
+                disabled={isSubmitting}
+                className="rounded-xl border border-white/15 px-4 py-3 text-sm font-semibold text-slate-200 transition hover:bg-white/5 disabled:cursor-not-allowed disabled:opacity-70"
+              >
+                Volver
+              </button>
+              <button
+                type="button"
+                onClick={handleResendOtp}
+                disabled={isSubmitting}
+                className="rounded-xl border border-white/15 px-4 py-3 text-sm font-semibold text-slate-200 transition hover:bg-white/5 disabled:cursor-not-allowed disabled:opacity-70"
+              >
+                Reenviar codigo
+              </button>
+            </div>
+            <button
+              type="submit"
+              disabled={isSubmitting}
+              className="rounded-xl bg-gradient-to-r from-cyan-500 to-emerald-500 py-3 font-semibold text-slate-950 transition hover:brightness-110 disabled:cursor-not-allowed disabled:opacity-70"
+            >
+              {isSubmitting ? "Verificando..." : "Validar acceso"}
+            </button>
+          </form>
+          )}
+          </div>
         </section>
       </div>
     </div>

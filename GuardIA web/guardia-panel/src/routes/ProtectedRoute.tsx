@@ -6,7 +6,7 @@ export default function ProtectedRoute({
 }: {
   children: React.ReactNode;
 }) {
-  const { isAuthenticated, isAuthReady } = useAuth();
+  const { isAuthenticated, isAuthReady, isSecondFactorVerified } = useAuth();
 
   if (!isAuthReady) {
     return (
@@ -17,6 +17,10 @@ export default function ProtectedRoute({
   }
 
   if (!isAuthenticated) {
+    return <Navigate to="/login" replace />;
+  }
+
+  if (!isSecondFactorVerified) {
     return <Navigate to="/login" replace />;
   }
 

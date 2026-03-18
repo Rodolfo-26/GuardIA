@@ -1,16 +1,5 @@
 import { useState } from "react";
-
-export type CameraRecord = {
-  id: string;
-  name: string;
-  zone: string;
-  status: "online" | "offline" | "warning";
-  protocol: "RTSP" | "ONVIF";
-  resolution: "720p" | "1080p" | "4K";
-  streamUrl: string;
-  aiProfiles: string[];
-  retentionDays: number;
-};
+import type { CameraRecord } from "../../../services/cameras";
 
 type CameraDraft = Omit<CameraRecord, "id" | "status">;
 

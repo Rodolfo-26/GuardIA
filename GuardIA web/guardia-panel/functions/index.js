@@ -1,9 +1,11 @@
 const admin = require("firebase-admin");
 const functions = require("firebase-functions/v1");
+const crypto = require("crypto");
 
 admin.initializeApp();
 const db = admin.firestore();
 const AUDIT_COLLECTION = "auditoria_usuarios";
+const EMAIL_OTP_COLLECTION = "auth_email_otp";
 
 function isAdminFromToken(auth) {
   const claims = auth?.token || {};
@@ -91,6 +93,126 @@ async function getUserDisplayName(uid) {
   } catch {
     return uid;
   }
+}
+
+function getOtpHash(uid, code) {
+  const secret = functions.config().guardia_auth?.otp_secret || "guardia-dev-otp-secret";
+  return crypto.createHash("sha256").update(`${uid}:${code}:${secret}`).digest("hex");
+}
+
+function createOtpCode() {
+  return String(crypto.randomInt(100000, 999999));
+}
+
+function buildOtpEmailTemplate({ displayName, code }) {
+  return `
+    <div style="background:#eef4ff;padding:36px 16px;font-family:Arial,sans-serif;color:#f8fafc;">
+      <div style="max-width:640px;margin:0 auto;overflow:hidden;border-radius:30px;border:1px solid #27526d;background:
+        radial-gradient(circle at top left, rgba(103,232,249,0.26), transparent 32%),
+        radial-gradient(circle at top right, rgba(45,212,191,0.20), transparent 26%),
+        linear-gradient(180deg, #14314e 0%, #1b3655 46%, #223b58 100%);
+        box-shadow:0 24px 60px rgba(15,23,42,0.24), 0 0 0 1px rgba(125,211,252,0.12);">
+        <div style="padding:30px 30px 24px;border-bottom:1px solid rgba(186,230,253,0.18);">
+          <table role="presentation" width="100%" cellspacing="0" cellpadding="0" style="border-collapse:collapse;">
+            <tr>
+              <td style="vertical-align:middle;">
+                <div style="display:inline-flex;height:58px;width:58px;align-items:center;justify-content:center;border-radius:18px;border:1px solid rgba(103,232,249,0.42);background:linear-gradient(180deg, rgba(8,145,178,0.46), rgba(14,116,144,0.24));box-shadow:0 0 30px rgba(103,232,249,0.22);">
+                  <div style="height:24px;width:24px;border-radius:8px;background:#67e8f9;box-shadow:0 0 22px rgba(103,232,249,0.75);"></div>
+                </div>
+              </td>
+              <td style="padding-left:16px;vertical-align:middle;">
+                <p style="margin:0;font-size:11px;letter-spacing:0.32em;text-transform:uppercase;color:#d7f7ff !important;-webkit-text-fill-color:#d7f7ff;font-weight:700;">GuardIA Access</p>
+                <h1 style="margin:8px 0 0;font-size:34px;line-height:1;color:#ffffff !important;-webkit-text-fill-color:#ffffff;font-weight:900;">Verificacion de acceso</h1>
+              </td>
+              <td style="text-align:right;vertical-align:top;">
+                <span style="display:inline-block;border-radius:999px;border:1px solid rgba(110,231,183,0.46);background:rgba(16,185,129,0.26);padding:8px 12px;font-size:11px;font-weight:800;letter-spacing:0.08em;color:#ffffff !important;-webkit-text-fill-color:#ffffff;text-transform:uppercase;">
+                  Seguridad activa
+                </span>
+              </td>
+            </tr>
+          </table>
+        </div>
+        <div style="padding:30px;">
+          <div style="margin:0 0 18px;border-radius:18px;border:1px solid rgba(251,191,36,0.42);background:linear-gradient(90deg, rgba(251,191,36,0.26), rgba(249,115,22,0.20));padding:14px 16px;box-shadow:0 10px 24px rgba(249,115,22,0.14);">
+            <p style="margin:0;font-size:12px;font-weight:800;letter-spacing:0.18em;text-transform:uppercase;color:#fff7d6 !important;-webkit-text-fill-color:#fff7d6;">Intento de acceso detectado</p>
+          </div>
+          <p style="margin:0 0 12px;font-size:16px;color:#ffffff !important;-webkit-text-fill-color:#ffffff;">Hola <span style="color:#ffffff !important;-webkit-text-fill-color:#ffffff;font-weight:800;">${displayName || "usuario"}</span>,</p>
+          <p style="margin:0 0 22px;font-size:16px;line-height:1.7;color:#edf6ff !important;-webkit-text-fill-color:#edf6ff;">
+            Detectamos un intento de acceso a tu panel de monitoreo inteligente. Para completar el ingreso,
+            confirma tu identidad con el siguiente codigo temporal.
+          </p>
+          <div style="margin:0 0 18px;padding:24px;border-radius:24px;border:1px solid rgba(103,232,249,0.34);background:
+            radial-gradient(circle at top left, rgba(186,230,253,0.28), transparent 38%),
+            linear-gradient(135deg, rgba(56,189,248,0.34), rgba(45,212,191,0.30)),
+            linear-gradient(180deg, rgba(12,74,110,0.78), rgba(17,24,39,0.66));text-align:center;box-shadow:inset 0 1px 0 rgba(255,255,255,0.10), 0 0 44px rgba(56,189,248,0.18);">
+            <p style="margin:0 0 10px;font-size:11px;font-weight:700;letter-spacing:0.24em;text-transform:uppercase;color:#f0f9ff !important;-webkit-text-fill-color:#f0f9ff;">Codigo de acceso</p>
+            <div style="font-size:42px;letter-spacing:0.28em;font-weight:900;color:#ffffff !important;-webkit-text-fill-color:#ffffff;text-shadow:0 0 30px rgba(186,230,253,0.48);">${code}</div>
+            <p style="margin:14px 0 0;font-size:12px;color:#f8fdff !important;-webkit-text-fill-color:#f8fdff;">Vigencia: 10 minutos</p>
+          </div>
+          <div style="margin:0 0 18px;padding:16px;border-radius:18px;border:1px solid rgba(255,255,255,0.14);background:rgba(255,255,255,0.12);">
+            <p style="margin:0;font-size:13px;line-height:1.6;color:#f8fbff !important;-webkit-text-fill-color:#f8fbff;">
+              Si no solicitaste este acceso, ignora este mensaje y revisa la actividad de tu cuenta inmediatamente.
+            </p>
+          </div>
+          <table role="presentation" width="100%" cellspacing="0" cellpadding="0" style="margin:0 0 18px;border-collapse:collapse;">
+            <tr>
+              <td style="width:50%;padding-right:6px;">
+                <div style="border-radius:16px;border:1px solid rgba(125,211,252,0.20);background:rgba(125,211,252,0.12);padding:14px;">
+                  <p style="margin:0;font-size:10px;letter-spacing:0.18em;text-transform:uppercase;color:#d7f7ff !important;-webkit-text-fill-color:#d7f7ff;">Canal</p>
+                  <p style="margin:6px 0 0;font-size:14px;font-weight:800;color:#ffffff !important;-webkit-text-fill-color:#ffffff;">Correo seguro</p>
+                </div>
+              </td>
+              <td style="width:50%;padding-left:6px;">
+                <div style="border-radius:16px;border:1px solid rgba(110,231,183,0.20);background:rgba(16,185,129,0.13);padding:14px;">
+                  <p style="margin:0;font-size:10px;letter-spacing:0.18em;text-transform:uppercase;color:#ecfdf5 !important;-webkit-text-fill-color:#ecfdf5;">Estado</p>
+                  <p style="margin:6px 0 0;font-size:14px;font-weight:800;color:#ffffff !important;-webkit-text-fill-color:#ffffff;">Validacion requerida</p>
+                </div>
+              </td>
+            </tr>
+          </table>
+          <p style="margin:0;font-size:12px;line-height:1.6;color:#edf4ff !important;-webkit-text-fill-color:#edf4ff;">
+            Este mensaje fue generado por el sistema de acceso seguro de GuardIA.
+          </p>
+        </div>
+      </div>
+    </div>
+  `;
+}
+
+async function sendOtpEmail({ to, displayName, code }) {
+  const apiKey = functions.config().guardia_mail?.api_key || "";
+  const from = functions.config().guardia_mail?.from || "";
+
+  if (!apiKey || !from) {
+    if (process.env.FUNCTIONS_EMULATOR === "true") {
+      console.log("[GuardIA OTP][EMULATOR]", { to, code });
+      return { debugCode: code };
+    }
+    throw new functions.https.HttpsError(
+      "failed-precondition",
+      "Configura guardia_mail.api_key y guardia_mail.from para enviar correos OTP.",
+    );
+  }
+
+  const response = await fetch("https://api.resend.com/emails", {
+    method: "POST",
+    headers: {
+      Authorization: `Bearer ${apiKey}`,
+      "Content-Type": "application/json",
+    },
+    body: JSON.stringify({
+      from,
+      to: [to],
+      subject: "GuardIA | Codigo de acceso",
+      html: buildOtpEmailTemplate({ displayName, code }),
+    }),
+  });
+
+  if (!response.ok) {
+    throw new functions.https.HttpsError("internal", "No fue posible enviar el correo de verificacion.");
+  }
+
+  return {};
 }
 
 exports.createUserByAdmin = functions.region("us-central1").https.onCall(async (data, context) => {
@@ -376,6 +498,107 @@ exports.closeUserSessions = functions.region("us-central1").https.onCall(async (
     afterData: { sessions: 0 },
     meta: { source: "closeUserSessions" },
   });
+
+  return { ok: true };
+});
+
+exports.beginEmailSecondFactor = functions.region("us-central1").https.onCall(async (_, context) => {
+  if (!context.auth) {
+    throw new functions.https.HttpsError("unauthenticated", "Debes iniciar sesion.");
+  }
+
+  const uid = context.auth.uid;
+  const authUser = await admin.auth().getUser(uid);
+  const email = authUser.email;
+  if (!email) {
+    throw new functions.https.HttpsError("failed-precondition", "La cuenta no tiene un correo registrado.");
+  }
+
+  const code = createOtpCode();
+  const expiresAt = admin.firestore.Timestamp.fromDate(new Date(Date.now() + 10 * 60 * 1000));
+  const profileRole = await getProfileRole(uid);
+
+  const otpRef = db.collection(EMAIL_OTP_COLLECTION).doc(uid);
+  await otpRef.set({
+    uid,
+    email,
+    role: profileRole || "Operador",
+    codeHash: getOtpHash(uid, code),
+    attempts: 0,
+    maxAttempts: 5,
+    expiresAt,
+    usedAt: null,
+    createdAt: admin.firestore.FieldValue.serverTimestamp(),
+  });
+
+  const mailResult = await sendOtpEmail({
+    to: email,
+    displayName: authUser.displayName || email,
+    code,
+  });
+
+  return {
+    ok: true,
+    message: "Te enviamos un codigo de verificacion al correo registrado.",
+    expiresInSeconds: 600,
+    ...(mailResult.debugCode ? { debugCode: mailResult.debugCode } : {}),
+  };
+});
+
+exports.verifyEmailSecondFactor = functions.region("us-central1").https.onCall(async (data, context) => {
+  if (!context.auth) {
+    throw new functions.https.HttpsError("unauthenticated", "Debes iniciar sesion.");
+  }
+
+  const { code } = data || {};
+  assertNonEmpty(code, "code");
+
+  const uid = context.auth.uid;
+  const otpRef = db.collection(EMAIL_OTP_COLLECTION).doc(uid);
+  const otpSnap = await otpRef.get();
+  if (!otpSnap.exists) {
+    throw new functions.https.HttpsError("not-found", "No existe una verificacion pendiente.");
+  }
+
+  const otp = otpSnap.data() || {};
+  const expiresAt = otp.expiresAt?.toDate ? otp.expiresAt.toDate().getTime() : 0;
+  const attempts = Number(otp.attempts || 0);
+  const maxAttempts = Number(otp.maxAttempts || 5);
+
+  if (otp.usedAt) {
+    throw new functions.https.HttpsError("failed-precondition", "Este codigo ya fue utilizado.");
+  }
+
+  if (!expiresAt || Date.now() > expiresAt) {
+    throw new functions.https.HttpsError("deadline-exceeded", "El codigo ha expirado.");
+  }
+
+  if (attempts >= maxAttempts) {
+    throw new functions.https.HttpsError("resource-exhausted", "Se excedio el numero de intentos permitidos.");
+  }
+
+  const valid = otp.codeHash === getOtpHash(uid, String(code).trim());
+  if (!valid) {
+    await otpRef.set({ attempts: attempts + 1 }, { merge: true });
+    throw new functions.https.HttpsError("permission-denied", "Codigo incorrecto.");
+  }
+
+  await otpRef.set(
+    {
+      usedAt: admin.firestore.FieldValue.serverTimestamp(),
+      verifiedAt: admin.firestore.FieldValue.serverTimestamp(),
+      attempts: attempts + 1,
+    },
+    { merge: true },
+  );
+
+  await db.collection("usuarios").doc(uid).set(
+    {
+      lastSecondFactorAt: admin.firestore.FieldValue.serverTimestamp(),
+      updatedAt: admin.firestore.FieldValue.serverTimestamp(),
+    },
+    { merge: true },
+  );
 
   return { ok: true };
 });

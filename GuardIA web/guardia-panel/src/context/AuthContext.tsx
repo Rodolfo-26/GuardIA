@@ -1,6 +1,7 @@
 import { createContext, useContext, useEffect, useMemo, useState } from "react";
-import { onAuthStateChanged, signInWithEmailAndPassword, signOut, type User } from "firebase/auth";
-import { firebaseAuth } from "../lib/firebase";
+import { onAuthStateChanged, sendPasswordResetEmail, signInWithEmailAndPassword, signOut, type User } from "firebase/auth";
+import { httpsCallable } from "firebase/functions";
+import { firebaseAuth, firebaseFunctions } from "../lib/firebase";
 import {
   ensureUserProfile,
   getUserRoleFromProfile,
@@ -15,7 +16,11 @@ type AuthContextType = {
   appRole: AppUserRole | null;
   isAuthReady: boolean;
   isAuthenticated: boolean;
+  isSecondFactorVerified: boolean;
   login: (email: string, password: string) => Promise<{ ok: boolean; message?: string }>;
+  beginEmailSecondFactor: () => Promise<{ ok: boolean; message?: string; expiresInSeconds?: number; debugCode?: string }>;
+  verifyEmailSecondFactor: (code: string) => Promise<{ ok: boolean; message?: string }>;
+  sendResetPassword: (email: string) => Promise<{ ok: boolean; message?: string }>;
   logout: () => Promise<void>;
 };
 
@@ -25,6 +30,11 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   const [user, setUser] = useState<User | null>(null);
   const [appRole, setAppRole] = useState<AppUserRole | null>(null);
   const [isAuthReady, setIsAuthReady] = useState(false);
+  const [isSecondFactorVerified, setIsSecondFactorVerified] = useState(false);
+
+  function getSecondFactorStorageKey(uid: string) {
+    return `guardia-email-2fa:${uid}`;
+  }
 
   async function hydrateUserSecurity(nextUser: User) {
     try {
@@ -54,8 +64,10 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     const unsubscribe = onAuthStateChanged(firebaseAuth, async (nextUser) => {
       if (nextUser) {
         await hydrateUserSecurity(nextUser);
+        setIsSecondFactorVerified(window.sessionStorage.getItem(getSecondFactorStorageKey(nextUser.uid)) === "verified");
       } else {
         setAppRole(null);
+        setIsSecondFactorVerified(false);
       }
       setUser(nextUser);
       setIsAuthReady(true);
@@ -67,6 +79,8 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   async function login(email: string, password: string) {
     try {
       const credentials = await signInWithEmailAndPassword(firebaseAuth, email, password);
+      window.sessionStorage.removeItem(getSecondFactorStorageKey(credentials.user.uid));
+      setIsSecondFactorVerified(false);
       try {
         await registerUserLogin(credentials.user);
         await hydrateUserSecurity(credentials.user);
@@ -90,12 +104,93 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     }
   }
 
+  async function beginEmailSecondFactor() {
+    try {
+      const currentUser = firebaseAuth.currentUser;
+      if (!currentUser) {
+        return { ok: false, message: "No hay una sesion activa para validar." };
+      }
+
+      const callable = httpsCallable<undefined, {
+        ok?: boolean;
+        message?: string;
+        expiresInSeconds?: number;
+        debugCode?: string;
+      }>(firebaseFunctions, "beginEmailSecondFactor");
+      const result = await callable();
+      const payload = result.data;
+
+      if (!payload.ok) {
+        return { ok: false, message: payload.message || "No se pudo enviar el codigo de verificacion." };
+      }
+
+      return {
+        ok: true,
+        message: payload.message || "Codigo enviado al correo registrado.",
+        expiresInSeconds: payload.expiresInSeconds,
+        debugCode: payload.debugCode,
+      };
+    } catch {
+      return { ok: false, message: "No se pudo iniciar el segundo factor por correo." };
+    }
+  }
+
+  async function verifyEmailSecondFactor(code: string) {
+    try {
+      const currentUser = firebaseAuth.currentUser;
+      if (!currentUser) {
+        return { ok: false, message: "No hay una sesion activa para validar." };
+      }
+
+      const callable = httpsCallable<{ code: string }, { ok?: boolean; message?: string }>(
+        firebaseFunctions,
+        "verifyEmailSecondFactor",
+      );
+      const result = await callable({ code });
+      const payload = result.data;
+      if (!payload.ok) {
+        return { ok: false, message: payload.message || "El codigo de verificacion no es valido." };
+      }
+
+      window.sessionStorage.setItem(getSecondFactorStorageKey(currentUser.uid), "verified");
+      setIsSecondFactorVerified(true);
+      return { ok: true };
+    } catch {
+      return { ok: false, message: "No se pudo validar el segundo factor." };
+    }
+  }
+
   async function logout() {
     if (firebaseAuth.currentUser) {
-      await registerUserLogout(firebaseAuth.currentUser);
+      window.sessionStorage.removeItem(getSecondFactorStorageKey(firebaseAuth.currentUser.uid));
+      try {
+        await registerUserLogout(firebaseAuth.currentUser);
+      } catch (error) {
+        // No debe bloquear el cierre de sesion si falla el registro operativo.
+        console.error("No fue posible registrar el logout del usuario:", error);
+      }
     }
     await signOut(firebaseAuth);
     setAppRole(null);
+  }
+
+  async function sendResetPassword(email: string) {
+    try {
+      await sendPasswordResetEmail(firebaseAuth, email);
+      return { ok: true, message: "Se envio un enlace de recuperacion al correo indicado." };
+    } catch (error) {
+      const code = typeof error === "object" && error && "code" in error ? String(error.code) : "";
+
+      if (code === "auth/missing-email" || !email.trim()) {
+        return { ok: false, message: "Ingresa un correo valido para recuperar la cuenta." };
+      }
+
+      if (code === "auth/invalid-email") {
+        return { ok: false, message: "El correo no tiene un formato valido." };
+      }
+
+      return { ok: false, message: "No fue posible enviar el correo de recuperacion." };
+    }
   }
 
   const value = useMemo(
@@ -104,10 +199,14 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       appRole,
       isAuthReady,
       isAuthenticated: Boolean(user),
+      isSecondFactorVerified,
       login,
+      beginEmailSecondFactor,
+      verifyEmailSecondFactor,
+      sendResetPassword,
       logout,
     }),
-    [appRole, isAuthReady, user],
+    [appRole, isAuthReady, isSecondFactorVerified, user],
   );
 
   return <AuthContext.Provider value={value}>{children}</AuthContext.Provider>;

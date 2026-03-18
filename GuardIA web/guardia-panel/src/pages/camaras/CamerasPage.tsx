@@ -1,52 +1,29 @@
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import CameraRegistrationModal, {
   type CameraRecord,
 } from "./components/CameraRegistrationModal";
 import CameraDetailsModal from "./components/CameraDetailsModal";
-
-const INITIAL_CAMERAS: CameraRecord[] = [
-  {
-    id: "cam-01",
-    name: "Acceso Norte",
-    zone: "Perimetro A",
-    status: "online",
-    protocol: "RTSP",
-    resolution: "1080p",
-    streamUrl: "rtsp://10.0.1.20/live",
-    aiProfiles: ["Deteccion de intrusos", "Zona prohibida"],
-    retentionDays: 30,
-  },
-  {
-    id: "cam-02",
-    name: "Patio Logistico",
-    zone: "Bodega externa",
-    status: "warning",
-    protocol: "ONVIF",
-    resolution: "4K",
-    streamUrl: "rtsp://10.0.1.32/live",
-    aiProfiles: ["Deteccion de vehiculos", "Conteo de personas"],
-    retentionDays: 45,
-  },
-  {
-    id: "cam-03",
-    name: "Pasillo central",
-    zone: "Interior nivel 1",
-    status: "offline",
-    protocol: "RTSP",
-    resolution: "720p",
-    streamUrl: "rtsp://10.0.1.41/live",
-    aiProfiles: ["Reconocimiento facial"],
-    retentionDays: 15,
-  },
-];
+import { createCameraRecord, fetchCameras, updateCameraRecord } from "../../services/cameras";
 
 export default function CamerasPage() {
-  const [cameras, setCameras] = useState<CameraRecord[]>(INITIAL_CAMERAS);
+  const [cameras, setCameras] = useState<CameraRecord[]>([]);
+  const [isLoading, setIsLoading] = useState(true);
+  const [error, setError] = useState("");
   const [query, setQuery] = useState("");
   const [statusFilter, setStatusFilter] = useState<"all" | CameraRecord["status"]>("all");
   const [modalOpen, setModalOpen] = useState(false);
   const [editing, setEditing] = useState<CameraRecord | null>(null);
   const [detailsCamera, setDetailsCamera] = useState<CameraRecord | null>(null);
+
+  useEffect(() => {
+    void fetchCameras()
+      .then((items) => {
+        setCameras(items);
+        setError("");
+      })
+      .catch(() => setError("No fue posible cargar camaras desde PostgreSQL."))
+      .finally(() => setIsLoading(false));
+  }, []);
 
   const filtered = useMemo(() => {
     const normalized = query.trim().toLowerCase();
@@ -92,30 +69,28 @@ export default function CamerasPage() {
     setDetailsCamera(null);
   }
 
-  function handleSave(
+  async function handleSave(
     draft: Omit<CameraRecord, "id" | "status">,
     existingId?: string,
   ) {
-    setCameras((prev) => {
+    try {
       if (existingId) {
-        return prev.map((cam) =>
-          cam.id === existingId ? { ...cam, ...draft, status: "online" } : cam,
-        );
+        await updateCameraRecord(existingId, draft);
+        setCameras((prev) => prev.map((cam) => (cam.id === existingId ? { ...cam, ...draft, status: "online" } : cam)));
+      } else {
+        const created = await createCameraRecord(draft);
+        setCameras((prev) => [{ id: created.id, status: "online", ...draft }, ...prev]);
       }
 
-      const next: CameraRecord = {
-        id: `cam-${String(prev.length + 1).padStart(2, "0")}`,
-        status: "online",
-        ...draft,
-      };
-      return [next, ...prev];
-    });
-
-    closeModal();
+      setError("");
+      closeModal();
+    } catch {
+      setError("No fue posible guardar la camara en PostgreSQL.");
+    }
   }
 
   return (
-    <section className="space-y-5">
+    <section className="space-y-4">
       <style>{`
         @keyframes camerasRise {
           from { opacity: 0; transform: translateY(12px); }
@@ -177,18 +152,22 @@ export default function CamerasPage() {
           </div>
         </div>
 
-        <div className="mt-4 grid gap-3 xl:grid-cols-2">
-          {filtered.map((cam, index) => (
+        <div className="mt-4 grid gap-3 md:grid-cols-2">
+          {isLoading ? (
+            <p className="rounded-xl border border-slate-700 bg-slate-950/70 p-3 text-sm text-slate-300">
+              Cargando camaras...
+            </p>
+          ) : filtered.map((cam, index) => (
             <article
               key={cam.id}
-              className="rounded-2xl border border-cyan-300/15 bg-slate-950/65 p-4 transition hover:-translate-y-0.5"
+              className="rounded-2xl border border-cyan-300/15 bg-slate-950/65 p-3.5 transition hover:-translate-y-0.5"
               style={{
                 animation: `camerasRise 320ms ease-out ${index * 75}ms both, camerasGlow 3.4s ease-in-out ${index * 120}ms infinite`,
               }}
             >
               <header className="flex items-start justify-between gap-3">
                 <div>
-                  <p className="text-lg font-black text-white">{cam.name}</p>
+                  <p className="text-base font-black text-white">{cam.name}</p>
                   <p className="text-xs text-slate-400">{cam.zone}</p>
                 </div>
                 <StatusBadge status={cam.status} />
@@ -199,17 +178,14 @@ export default function CamerasPage() {
                 <InfoPill label="Resolucion" value={cam.resolution} />
                 <InfoPill label="Retencion" value={`${cam.retentionDays} dias`} />
               </div>
-              <div className="mt-3 flex items-center gap-2 text-[11px]">
+              <div className="mt-3 flex items-center justify-between gap-2 text-[11px]">
                 <span className="rounded-full border border-cyan-300/25 bg-cyan-400/10 px-2.5 py-1 font-semibold text-cyan-100">
                   {cam.aiProfiles.length} perfiles IA
                 </span>
-                <span className="rounded-full border border-white/15 bg-white/5 px-2.5 py-1 text-slate-300">
-                  {cam.zone}
-                </span>
+                <span className="text-slate-500">{cam.id}</span>
               </div>
 
-              <footer className="mt-3 flex items-center justify-between gap-3">
-                <p className="text-[11px] text-slate-400">Informacion detallada en modal</p>
+              <footer className="mt-3 flex items-center justify-end gap-2">
                 <div className="flex gap-2">
                   <button
                     type="button"
@@ -231,6 +207,12 @@ export default function CamerasPage() {
           ))}
         </div>
       </div>
+
+      {error ? (
+        <div className="rounded-xl border border-rose-400/30 bg-rose-500/10 px-4 py-3 text-sm text-rose-200">
+          {error}
+        </div>
+      ) : null}
 
       {modalOpen && (
         <CameraRegistrationModal
@@ -273,12 +255,16 @@ function MetricCard({
 
   return (
     <article
-      className="rounded-2xl border border-cyan-300/20 bg-slate-900/70 p-4 backdrop-blur"
+      className="rounded-2xl border border-cyan-300/20 bg-slate-900/70 px-4 py-3 backdrop-blur"
       style={{ animation: `camerasRise 320ms ease-out ${delay}ms both` }}
     >
-      <p className="text-xs uppercase tracking-[0.15em] text-slate-400">{label}</p>
-      <div className="mt-3 flex items-center justify-between">
-        <p className="text-3xl font-black text-white">{value}</p>
+      <div className="flex items-center justify-between gap-3">
+        <div className="min-w-0">
+          <p className="text-[11px] uppercase tracking-[0.15em] text-slate-400">{label}</p>
+          <div className="mt-1 flex items-baseline gap-2">
+            <p className="text-2xl font-black text-white">{value}</p>
+          </div>
+        </div>
         <span className={`rounded-full border px-2.5 py-1 text-xs font-semibold ${tones[tone]}`}>
           Live
         </span>

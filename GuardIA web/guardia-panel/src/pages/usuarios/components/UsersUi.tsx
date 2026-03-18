@@ -19,13 +19,17 @@ export function MetricCard({
   };
 
   return (
-    <article className="rounded-2xl border border-cyan-300/20 bg-slate-900/70 p-4 backdrop-blur">
-      <p className="text-xs uppercase tracking-[0.16em] text-slate-300">{label}</p>
-      <div className="mt-3 flex items-center justify-between gap-2">
-        <p className="text-3xl font-black text-white">{value}</p>
+    <article className="rounded-2xl border border-cyan-300/20 bg-slate-900/70 px-4 py-3 backdrop-blur">
+      <div className="flex items-center justify-between gap-3">
+        <div className="min-w-0">
+          <p className="text-[11px] uppercase tracking-[0.16em] text-slate-400">{label}</p>
+          <div className="mt-1 flex items-baseline gap-2">
+            <p className="text-2xl font-black text-white">{value}</p>
+            <p className="truncate text-xs text-slate-400">{sub}</p>
+          </div>
+        </div>
         <span className={`rounded-full border px-2.5 py-1 text-[11px] font-semibold ${toneClass[tone]}`}>Live</span>
       </div>
-      <p className="mt-2 text-xs text-slate-300">{sub}</p>
     </article>
   );
 }

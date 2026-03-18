@@ -1,4 +1,5 @@
 import { Outlet, useLocation } from "react-router-dom";
+import { useState } from "react";
 import Sidebar from "../components/sidebar/Sidebar";
 import { useAuth } from "../context/AuthContext";
 
@@ -32,6 +33,7 @@ const PAGE_META: Record<string, { title: string; subtitle: string }> = {
 export default function AppLayout() {
   const { pathname } = useLocation();
   const { appRole } = useAuth();
+  const [sidebarHidden, setSidebarHidden] = useState(false);
 
   const defaultMeta = PAGE_META[pathname] ?? {
     title: "GuardIA",
@@ -84,15 +86,31 @@ export default function AppLayout() {
       </div>
 
       <div className="relative z-10 flex h-screen">
-        <Sidebar />
+        <Sidebar
+          hidden={sidebarHidden}
+          onHide={() => setSidebarHidden(true)}
+          onShow={() => setSidebarHidden(false)}
+        />
 
-        <main className="ml-72 h-screen flex-1 overflow-y-auto p-4 sm:p-6 lg:p-8">
-          <header className="mb-6 rounded-2xl border border-cyan-300/20 bg-slate-900/70 p-5 backdrop-blur">
+        <main
+          className={`scrollbar-hidden h-screen flex-1 overflow-y-auto p-4 transition-[margin] duration-300 sm:p-6 lg:p-8 ${
+            sidebarHidden ? "ml-0" : "ml-72"
+          }`}
+        >
+          <header
+            className={`mb-6 rounded-2xl border border-cyan-300/20 bg-slate-900/70 backdrop-blur ${
+              pathname === "/usuarios" ? "p-4" : "p-5"
+            }`}
+          >
             <div className="flex flex-wrap items-start justify-between gap-3">
               <div>
                 <p className="text-xs font-semibold uppercase tracking-[0.2em] text-cyan-200/90">AI Security Grid</p>
-                <h1 className="mt-2 text-3xl font-black text-white">{meta.title}</h1>
-                <p className="mt-1 text-sm text-slate-300">{meta.subtitle}</p>
+                <h1 className={`${pathname === "/usuarios" ? "mt-1 text-2xl" : "mt-2 text-3xl"} font-black text-white`}>
+                  {meta.title}
+                </h1>
+                <p className={`${pathname === "/usuarios" ? "mt-0.5 text-xs" : "mt-1 text-sm"} text-slate-300`}>
+                  {meta.subtitle}
+                </p>
               </div>
               <div className="inline-flex items-center gap-2 rounded-full border border-emerald-300/30 bg-emerald-400/10 px-3 py-1 text-xs font-semibold text-emerald-200">
                 <span className="h-2 w-2 rounded-full bg-emerald-300" /> IA operativa

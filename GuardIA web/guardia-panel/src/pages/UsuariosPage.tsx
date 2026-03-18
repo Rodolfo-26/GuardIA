@@ -35,6 +35,10 @@ export default function UsuariosPage() {
   const [selectedId, setSelectedId] = useState<string>("");
   const [pendingSelectId, setPendingSelectId] = useState<string | null>(null);
   const [showCreateModal, setShowCreateModal] = useState(false);
+  const [detailUserId, setDetailUserId] = useState<string | null>(null);
+  const [showAuditModal, setShowAuditModal] = useState(false);
+  const [page, setPage] = useState(1);
+  const pageSize = 8;
   const [roleVerification, setRoleVerification] = useState<{
     targetId: string;
     targetName: string;
@@ -154,6 +158,10 @@ export default function UsuariosPage() {
   }, [query, roleFilter, statusFilter, users]);
 
   useEffect(() => {
+    setPage(1);
+  }, [query, roleFilter, statusFilter, viewMode]);
+
+  useEffect(() => {
     if (!pendingSelectId) return;
     if (!users.some((item) => item.id === pendingSelectId)) return;
     setSelectedId(pendingSelectId);
@@ -171,9 +179,23 @@ export default function UsuariosPage() {
     }
   }, [filtered, selectedId]);
 
+  const totalPages = Math.max(1, Math.ceil(filtered.length / pageSize));
+  const paginatedUsers = useMemo(() => {
+    const start = (page - 1) * pageSize;
+    return filtered.slice(start, start + pageSize);
+  }, [filtered, page, pageSize]);
+
+  useEffect(() => {
+    if (page > totalPages) {
+      setPage(totalPages);
+    }
+  }, [page, totalPages]);
+
   const selected = filtered.find((user) => user.id === selectedId) ?? null;
+  const detailUser = users.find((item) => item.id === detailUserId) ?? null;
   const currentProfile = users.find((item) => item.id === currentUserId) ?? null;
   const isSelfView = viewMode === "self";
+  const recentAuditLogs = auditLogs.slice(0, 5);
 
   const counters = useMemo(() => {
     return users.reduce(
@@ -242,11 +264,10 @@ export default function UsuariosPage() {
   return (
     <section className="space-y-4">
       {!isSelfView ? (
-        <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
+        <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-3">
           <MetricCard label="Usuarios activos" value={`${counters.active}`} tone="emerald" sub="Sesion habilitada" />
           <MetricCard label="Usuarios inactivos" value={`${counters.inactive}`} tone="amber" sub="Sin actividad reciente" />
           <MetricCard label="Bloqueados" value={`${counters.blocked}`} tone="rose" sub="Requieren revision" />
-          <MetricCard label="Operadores" value={`${counters.operators}`} tone="cyan" sub="Respuesta operativa" />
         </div>
       ) : (
         <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-3">
@@ -313,15 +334,36 @@ export default function UsuariosPage() {
 
       {!isSelfView ? (
         <>
-        <div className="grid gap-4 xl:grid-cols-[1fr_1.1fr_0.9fr]">
+        <div className="grid gap-4">
         <article className="rounded-2xl border border-cyan-300/20 bg-slate-900/70 p-4 backdrop-blur">
-          <h3 className="text-sm font-bold uppercase tracking-[0.16em] text-cyan-200">Usuarios registrados</h3>
+          <div className="flex flex-wrap items-center justify-between gap-3">
+            <div>
+              <h3 className="text-sm font-bold uppercase tracking-[0.16em] text-cyan-200">Usuarios registrados</h3>
+              <p className="mt-1 text-xs text-slate-400">Lista compacta. El detalle y las acciones viven en modal.</p>
+            </div>
+            <div className="flex flex-wrap items-center gap-2">
+              <span className="rounded-full border border-cyan-300/25 bg-cyan-400/10 px-3 py-1 text-xs font-semibold text-cyan-100">
+                {filtered.length} usuarios
+              </span>
+              <span className="rounded-full border border-white/10 bg-white/5 px-3 py-1 text-xs font-semibold text-slate-300">
+                Pagina {page}/{totalPages}
+              </span>
+            </div>
+          </div>
 
-          <div className="mt-4 space-y-2">
+          <div className="mt-4 overflow-hidden rounded-2xl border border-white/10 bg-slate-950/55">
             {isLoading ? (
-              <p className="rounded-xl border border-slate-700 bg-slate-950/70 p-3 text-sm text-slate-300">Cargando usuarios...</p>
-            ) : filtered.length ? (
-              filtered.map((user) => {
+              <p className="p-4 text-sm text-slate-300">Cargando usuarios...</p>
+            ) : paginatedUsers.length ? (
+              <>
+              <div className="hidden grid-cols-[minmax(0,1.3fr)_170px_170px_auto] gap-3 border-b border-white/10 bg-white/[0.03] px-4 py-3 text-[11px] font-semibold uppercase tracking-[0.16em] text-slate-400 md:grid">
+                <span>Usuario</span>
+                <span>Rol / Sede</span>
+                <span>Estado</span>
+                <span className="text-right">Accion</span>
+              </div>
+              <div className="divide-y divide-white/10">
+              {paginatedUsers.map((user) => {
                 const active = user.id === selectedId;
                 const isCurrentSession = user.id === currentUserId;
                 return (
@@ -329,156 +371,101 @@ export default function UsuariosPage() {
                     key={user.id}
                     type="button"
                     onClick={() => setSelectedId(user.id)}
-                    className={`w-full rounded-xl border p-3 text-left transition ${
+                    className={`grid w-full gap-3 p-4 text-left transition md:grid-cols-[minmax(0,1.3fr)_170px_170px_auto] md:items-center ${
                       active
-                        ? "border-cyan-300/45 bg-cyan-400/10"
+                        ? "bg-cyan-400/10"
                         : isCurrentSession
-                          ? "border-emerald-300/40 bg-emerald-400/10 hover:border-emerald-300/60"
-                          : "border-slate-700 bg-slate-950/70 hover:border-cyan-300/30"
+                          ? "bg-emerald-400/10 hover:bg-emerald-400/15"
+                          : "bg-slate-950/30 hover:bg-white/5"
                     }`}
                   >
-                    <div className="flex items-start justify-between gap-2">
-                      <div>
-                        <p className="text-sm font-semibold text-slate-100">{user.fullName}</p>
-                        <p className="text-xs text-slate-400">{user.email}</p>
-                      </div>
-                      <StatusTag status={user.status} />
-                    </div>
-                    <div className="mt-2 flex items-center justify-between text-xs text-slate-300">
-                      <span className="inline-flex items-center gap-2">
-                        {user.site}
+                    <div className="min-w-0">
+                      <div className="flex flex-wrap items-center gap-2">
+                        <p className="truncate text-sm font-semibold text-slate-100">{user.fullName}</p>
                         {isCurrentSession && (
                           <span className="rounded-full border border-emerald-300/35 bg-emerald-400/15 px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wide text-emerald-200">
                             Sesion actual
                           </span>
                         )}
-                      </span>
-                      <span>{user.id.slice(0, 10)}</span>
+                      </div>
+                      <p className="mt-1 truncate text-xs text-slate-400">{user.email}</p>
+                    </div>
+                    <div className="min-w-0 text-xs text-slate-300">
+                      <span className="inline-flex rounded-full border border-white/10 bg-white/5 px-2.5 py-1">{user.role}</span>
+                      <p className="mt-1 truncate text-slate-400">{user.site}</p>
+                    </div>
+                    <div className="flex items-center gap-2 md:justify-between">
+                      <StatusTag status={user.status} />
+                    </div>
+                    <div className="flex justify-end">
+                      <button
+                        type="button"
+                        onClick={(event) => {
+                          event.stopPropagation();
+                          setSelectedId(user.id);
+                          setDetailUserId(user.id);
+                        }}
+                        className="rounded-xl border border-white/15 px-3 py-1.5 text-xs font-semibold text-slate-200 transition hover:bg-white/5"
+                      >
+                        Ver mas
+                      </button>
                     </div>
                   </button>
                 );
-              })
+              })}
+              </div>
+              </>
             ) : (
-              <p className="rounded-xl border border-slate-700 bg-slate-950/70 p-3 text-sm text-slate-300">
+              <p className="p-4 text-sm text-slate-300">
                 No hay usuarios con esos filtros.
               </p>
             )}
           </div>
-        </article>
 
-        <article className="rounded-2xl border border-cyan-300/20 bg-slate-900/70 p-4 backdrop-blur">
-          <h3 className="text-sm font-bold uppercase tracking-[0.16em] text-cyan-200">Perfil operativo</h3>
-          {selected ? (
-            <div className="mt-4 space-y-4">
-              {selected.id === currentUserId && (
-                <div className="rounded-xl border border-emerald-300/30 bg-emerald-400/10 px-3 py-2 text-xs font-semibold uppercase tracking-[0.15em] text-emerald-200">
-                  Perfil en uso actualmente
-                </div>
-              )}
-              <div className="rounded-xl border border-cyan-300/20 bg-slate-950/70 p-3">
-                <p className="text-xs uppercase tracking-[0.14em] text-slate-400">Usuario seleccionado</p>
-                <p className="mt-2 text-lg font-black text-white">{selected.fullName}</p>
-                <p className="mt-1 text-sm text-slate-300">{selected.email}</p>
-              </div>
-
-              <div className="grid gap-2">
-                <DetailRow label="ID" value={selected.id} />
-                <DetailRow label="Rol" value={selected.role} />
-                <DetailRow label="Estado" value={selected.status} />
-                <DetailRow label="Sede/Zona" value={selected.site} />
-                <DetailRow label="Ultimo acceso" value={selected.lastAccess} />
-                <DetailRow label="Sesiones activas" value={`${selected.sessions}`} />
-                <DetailRow label="Alertas atendidas" value={`${selected.alertsHandled}`} />
+          {filtered.length > pageSize ? (
+            <div className="mt-4 flex flex-wrap items-center justify-between gap-3">
+              <p className="text-xs text-slate-400">
+                Mostrando {(page - 1) * pageSize + 1}-{Math.min(page * pageSize, filtered.length)} de {filtered.length}
+              </p>
+              <div className="flex items-center gap-2">
+                <button
+                  type="button"
+                  onClick={() => setPage((current) => Math.max(1, current - 1))}
+                  disabled={page === 1}
+                  className="rounded-xl border border-white/15 px-3 py-2 text-xs font-semibold text-slate-200 transition hover:bg-white/5 disabled:cursor-not-allowed disabled:opacity-40"
+                >
+                  Anterior
+                </button>
+                <span className="rounded-lg border border-white/10 bg-white/5 px-3 py-2 text-xs font-semibold text-slate-300">
+                  {page}
+                </span>
+                <button
+                  type="button"
+                  onClick={() => setPage((current) => Math.min(totalPages, current + 1))}
+                  disabled={page === totalPages}
+                  className="rounded-xl border border-cyan-300/30 bg-cyan-400/10 px-3 py-2 text-xs font-semibold text-cyan-100 transition hover:bg-cyan-400/20 disabled:cursor-not-allowed disabled:opacity-40"
+                >
+                  Siguiente
+                </button>
               </div>
             </div>
-          ) : (
-            <p className="mt-4 rounded-xl border border-slate-700 bg-slate-950/70 p-3 text-sm text-slate-300">
-              Selecciona un usuario para ver su informacion.
-            </p>
-          )}
-        </article>
-
-        <article className="rounded-2xl border border-cyan-300/20 bg-slate-900/70 p-4 backdrop-blur">
-          <h3 className="text-sm font-bold uppercase tracking-[0.16em] text-cyan-200">Acciones administrativas</h3>
-          {selected ? (
-            <div className="mt-4 space-y-3">
-              <button
-                type="button"
-                onClick={handleToggleStatus}
-                className="w-full rounded-xl border border-amber-300/30 bg-amber-400/10 px-3 py-2 text-sm font-semibold text-amber-100 transition hover:bg-amber-400/20"
-              >
-                {selected.status === "Activo" ? "Marcar inactivo" : "Activar usuario"}
-              </button>
-
-              <button
-                type="button"
-                onClick={() => handleRoleChange("Operador")}
-                className="w-full rounded-xl border border-cyan-300/30 bg-cyan-400/10 px-3 py-2 text-sm font-semibold text-cyan-100 transition hover:bg-cyan-400/20"
-              >
-                Asignar rol operador
-              </button>
-
-              <button
-                type="button"
-                onClick={() => handleRoleChange("Supervisor")}
-                className="w-full rounded-xl border border-sky-300/30 bg-sky-400/10 px-3 py-2 text-sm font-semibold text-sky-100 transition hover:bg-sky-400/20"
-              >
-                Asignar rol supervisor
-              </button>
-
-              <button
-                type="button"
-                onClick={() => handleRoleChange("Admin")}
-                className="w-full rounded-xl border border-emerald-300/30 bg-emerald-400/10 px-3 py-2 text-sm font-semibold text-emerald-100 transition hover:bg-emerald-400/20"
-              >
-                Asignar rol admin
-              </button>
-
-              <button
-                type="button"
-                onClick={handleCloseSessions}
-                className="w-full rounded-xl border border-rose-300/30 bg-rose-400/10 px-3 py-2 text-sm font-semibold text-rose-100 transition hover:bg-rose-400/20"
-              >
-                Cerrar sesiones activas
-              </button>
-            </div>
-          ) : (
-            <p className="mt-4 rounded-xl border border-slate-700 bg-slate-950/70 p-3 text-sm text-slate-300">
-              Sin usuario seleccionado.
-            </p>
-          )}
-
-          <div className="mt-4 rounded-xl border border-slate-700 bg-slate-950/70 p-3">
-            <p className="text-xs uppercase tracking-[0.14em] text-slate-400">Politica recomendada</p>
-            <p className="mt-2 text-sm text-slate-300">
-              Crear usuarios de autenticacion desde backend seguro (Admin SDK) y mantener este panel para gestion operativa.
-            </p>
-          </div>
+          ) : null}
         </article>
       </div>
       <article className="rounded-2xl border border-cyan-300/20 bg-slate-900/70 p-4 backdrop-blur">
-        <h3 className="text-sm font-bold uppercase tracking-[0.16em] text-cyan-200">Bitacora de auditoria</h3>
-        {auditError ? (
-          <p className="mt-4 rounded-xl border border-rose-400/30 bg-rose-500/10 p-3 text-sm text-rose-200">{auditError}</p>
-        ) : auditLogs.length ? (
-          <div className="mt-4 space-y-2">
-            {auditLogs.map((log) => (
-              <div key={log.id} className="rounded-xl border border-slate-700 bg-slate-950/70 p-3">
-                <div className="flex flex-wrap items-center justify-between gap-2">
-                  <p className="text-sm font-semibold text-slate-100">{formatAuditAction(log.action)}</p>
-                  <span className="text-xs text-slate-400">{log.createdAt}</span>
-                </div>
-                <p className="mt-1 text-xs text-slate-300">
-                  Actor: {log.actorName} ({log.actorRole}) | Afectado: {log.targetName}
-                </p>
-              </div>
-            ))}
+        <div className="flex flex-wrap items-center justify-between gap-3">
+          <div>
+            <h3 className="text-sm font-bold uppercase tracking-[0.16em] text-cyan-200">Bitacora de auditoria</h3>
+            <p className="mt-1 text-xs text-slate-400">Consulta los ultimos movimientos solo cuando lo necesites.</p>
           </div>
-        ) : (
-          <p className="mt-4 rounded-xl border border-slate-700 bg-slate-950/70 p-3 text-sm text-slate-300">
-            Sin eventos de auditoria por ahora.
-          </p>
-        )}
+          <button
+            type="button"
+            onClick={() => setShowAuditModal(true)}
+            className="rounded-xl border border-cyan-300/30 bg-cyan-400/10 px-4 py-2 text-sm font-semibold text-cyan-100 transition hover:bg-cyan-400/20"
+          >
+            Consultar auditoria
+          </button>
+        </div>
       </article>
       </>
       ) : (
@@ -579,6 +566,180 @@ export default function UsuariosPage() {
             }
           }}
         />
+      )}
+
+      {!isSelfView && showAuditModal && (
+        <div className="fixed inset-0 z-[148] flex items-center justify-center bg-slate-950/80 p-4 backdrop-blur-sm">
+          <div className="w-full max-w-3xl rounded-3xl border border-cyan-300/25 bg-slate-900/95 shadow-[0_0_48px_rgba(34,211,238,0.2)]">
+            <div className="flex items-center justify-between border-b border-white/10 px-6 py-4">
+              <div>
+                <p className="text-xs font-semibold uppercase tracking-[0.2em] text-cyan-200/90">Auditoria</p>
+                <h3 className="mt-1 text-xl font-black text-white">Ultimos movimientos</h3>
+              </div>
+              <button
+                type="button"
+                onClick={() => setShowAuditModal(false)}
+                className="rounded-xl border border-white/15 px-3 py-2 text-xs font-semibold text-slate-200 hover:bg-white/5"
+              >
+                Cerrar
+              </button>
+            </div>
+
+            <div className="grid gap-4 p-6">
+              <div className="flex flex-wrap gap-2">
+                <button
+                  type="button"
+                  className="rounded-xl border border-white/15 px-3 py-2 text-xs font-semibold text-slate-200 transition hover:bg-white/5"
+                >
+                  Descargar PDF
+                </button>
+                <button
+                  type="button"
+                  className="rounded-xl border border-cyan-300/30 bg-cyan-400/10 px-3 py-2 text-xs font-semibold text-cyan-100 transition hover:bg-cyan-400/20"
+                >
+                  Exportar Excel
+                </button>
+              </div>
+
+              {auditError ? (
+                <p className="rounded-xl border border-rose-400/30 bg-rose-500/10 p-3 text-sm text-rose-200">{auditError}</p>
+              ) : recentAuditLogs.length ? (
+                <div className="space-y-2">
+                  {recentAuditLogs.map((log) => (
+                    <div key={log.id} className="rounded-xl border border-slate-700 bg-slate-950/70 p-3">
+                      <div className="flex flex-wrap items-center justify-between gap-2">
+                        <p className="text-sm font-semibold text-slate-100">{formatAuditAction(log.action)}</p>
+                        <span className="text-xs text-slate-400">{log.createdAt}</span>
+                      </div>
+                      <p className="mt-1 text-xs text-slate-300">
+                        Actor: {log.actorName} ({log.actorRole}) | Afectado: {log.targetName}
+                      </p>
+                    </div>
+                  ))}
+                </div>
+              ) : (
+                <p className="rounded-xl border border-slate-700 bg-slate-950/70 p-3 text-sm text-slate-300">
+                  Sin eventos de auditoria por ahora.
+                </p>
+              )}
+
+              {!auditError && auditLogs.length > 5 ? (
+                <p className="text-xs text-slate-400">
+                  Hay {auditLogs.length - 5} eventos adicionales. Usa las opciones de descarga para obtener el historial completo.
+                </p>
+              ) : null}
+            </div>
+          </div>
+        </div>
+      )}
+
+      {!isSelfView && detailUser && (
+        <div className="fixed inset-0 z-[149] flex items-center justify-center bg-slate-950/80 p-4 backdrop-blur-sm">
+          <div className="w-full max-w-3xl rounded-3xl border border-cyan-300/25 bg-slate-900/95 shadow-[0_0_48px_rgba(34,211,238,0.2)]">
+            <div className="flex items-center justify-between border-b border-white/10 px-6 py-4">
+              <div>
+                <p className="text-xs font-semibold uppercase tracking-[0.2em] text-cyan-200/90">Detalle de usuario</p>
+                <h3 className="mt-1 text-xl font-black text-white">{detailUser.fullName}</h3>
+              </div>
+              <button
+                type="button"
+                onClick={() => setDetailUserId(null)}
+                className="rounded-xl border border-white/15 px-3 py-2 text-xs font-semibold text-slate-200 hover:bg-white/5"
+              >
+                Cerrar
+              </button>
+            </div>
+
+            <div className="grid gap-5 p-6 lg:grid-cols-[1fr_0.9fr]">
+              <div className="space-y-4">
+                {detailUser.id === currentUserId && (
+                  <div className="rounded-xl border border-emerald-300/30 bg-emerald-400/10 px-3 py-2 text-xs font-semibold uppercase tracking-[0.15em] text-emerald-200">
+                    Perfil en uso actualmente
+                  </div>
+                )}
+                <div className="rounded-xl border border-cyan-300/20 bg-slate-950/70 p-4">
+                  <p className="text-xs uppercase tracking-[0.14em] text-slate-400">Usuario seleccionado</p>
+                  <p className="mt-2 text-lg font-black text-white">{detailUser.fullName}</p>
+                  <p className="mt-1 text-sm text-slate-300">{detailUser.email}</p>
+                </div>
+
+                <div className="grid gap-2">
+                  <DetailRow label="ID" value={detailUser.id} />
+                  <DetailRow label="Rol" value={detailUser.role} />
+                  <DetailRow label="Estado" value={detailUser.status} />
+                  <DetailRow label="Sede/Zona" value={detailUser.site} />
+                  <DetailRow label="Ultimo acceso" value={detailUser.lastAccess} />
+                  <DetailRow label="Sesiones activas" value={`${detailUser.sessions}`} />
+                  <DetailRow label="Alertas atendidas" value={`${detailUser.alertsHandled}`} />
+                </div>
+              </div>
+
+              <div className="space-y-3">
+                <button
+                  type="button"
+                  onClick={() => {
+                    setSelectedId(detailUser.id);
+                    handleToggleStatus();
+                  }}
+                  className="w-full rounded-xl border border-amber-300/30 bg-amber-400/10 px-3 py-2 text-sm font-semibold text-amber-100 transition hover:bg-amber-400/20"
+                >
+                  {detailUser.status === "Activo" ? "Marcar inactivo" : "Activar usuario"}
+                </button>
+
+                <button
+                  type="button"
+                  onClick={() => {
+                    setSelectedId(detailUser.id);
+                    handleRoleChange("Operador");
+                  }}
+                  className="w-full rounded-xl border border-cyan-300/30 bg-cyan-400/10 px-3 py-2 text-sm font-semibold text-cyan-100 transition hover:bg-cyan-400/20"
+                >
+                  Asignar rol operador
+                </button>
+
+                <button
+                  type="button"
+                  onClick={() => {
+                    setSelectedId(detailUser.id);
+                    handleRoleChange("Supervisor");
+                  }}
+                  className="w-full rounded-xl border border-sky-300/30 bg-sky-400/10 px-3 py-2 text-sm font-semibold text-sky-100 transition hover:bg-sky-400/20"
+                >
+                  Asignar rol supervisor
+                </button>
+
+                <button
+                  type="button"
+                  onClick={() => {
+                    setSelectedId(detailUser.id);
+                    handleRoleChange("Admin");
+                  }}
+                  className="w-full rounded-xl border border-emerald-300/30 bg-emerald-400/10 px-3 py-2 text-sm font-semibold text-emerald-100 transition hover:bg-emerald-400/20"
+                >
+                  Asignar rol admin
+                </button>
+
+                <button
+                  type="button"
+                  onClick={() => {
+                    setSelectedId(detailUser.id);
+                    handleCloseSessions();
+                  }}
+                  className="w-full rounded-xl border border-rose-300/30 bg-rose-400/10 px-3 py-2 text-sm font-semibold text-rose-100 transition hover:bg-rose-400/20"
+                >
+                  Cerrar sesiones activas
+                </button>
+
+                <div className="rounded-xl border border-slate-700 bg-slate-950/70 p-3">
+                  <p className="text-xs uppercase tracking-[0.14em] text-slate-400">Politica recomendada</p>
+                  <p className="mt-2 text-sm text-slate-300">
+                    Crear usuarios de autenticacion desde backend seguro y mantener este panel para gestion operativa.
+                  </p>
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
       )}
     </section>
   );

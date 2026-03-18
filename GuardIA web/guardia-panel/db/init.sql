@@ -61,6 +61,22 @@ CREATE TABLE IF NOT EXISTS sesiones_usuario (
   creado_en timestamptz NOT NULL DEFAULT now()
 );
 
+CREATE TABLE IF NOT EXISTS desafios_mfa (
+  id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+  usuario_id uuid NOT NULL REFERENCES usuarios(id) ON DELETE CASCADE,
+  canal text NOT NULL CHECK (canal IN ('email')),
+  codigo_hash text NOT NULL,
+  intentos int NOT NULL DEFAULT 0 CHECK (intentos >= 0),
+  max_intentos int NOT NULL DEFAULT 5 CHECK (max_intentos > 0),
+  expira_en timestamptz NOT NULL,
+  consumido_en timestamptz,
+  ip inet,
+  user_agent text,
+  creado_en timestamptz NOT NULL DEFAULT now(),
+  CHECK (consumido_en IS NULL OR consumido_en >= creado_en),
+  CHECK (expira_en >= creado_en)
+);
+
 CREATE TABLE IF NOT EXISTS sedes (
   id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
   nombre text NOT NULL,
@@ -83,13 +99,22 @@ CREATE TABLE IF NOT EXISTS camaras (
   zona_id uuid NOT NULL REFERENCES zonas(id) ON DELETE CASCADE,
   codigo text NOT NULL UNIQUE,
   nombre text NOT NULL,
+  protocolo text NOT NULL DEFAULT 'RTSP',
+  resolucion text NOT NULL DEFAULT '1080p',
   url_stream text,
+  perfiles_ia jsonb NOT NULL DEFAULT '[]'::jsonb,
+  retencion_dias int NOT NULL DEFAULT 30 CHECK (retencion_dias BETWEEN 1 AND 365),
   estado estado_camara NOT NULL DEFAULT 'offline',
   sensibilidad int NOT NULL DEFAULT 50 CHECK (sensibilidad BETWEEN 1 AND 100),
   grabacion_habilitada boolean NOT NULL DEFAULT true,
   instalada_en timestamptz,
   actualizado_en timestamptz NOT NULL DEFAULT now()
 );
+
+ALTER TABLE camaras ADD COLUMN IF NOT EXISTS protocolo text NOT NULL DEFAULT 'RTSP';
+ALTER TABLE camaras ADD COLUMN IF NOT EXISTS resolucion text NOT NULL DEFAULT '1080p';
+ALTER TABLE camaras ADD COLUMN IF NOT EXISTS perfiles_ia jsonb NOT NULL DEFAULT '[]'::jsonb;
+ALTER TABLE camaras ADD COLUMN IF NOT EXISTS retencion_dias int NOT NULL DEFAULT 30;
 
 CREATE TABLE IF NOT EXISTS historial_estado_camara (
   id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
@@ -165,6 +190,8 @@ CREATE INDEX IF NOT EXISTS idx_usuarios_rol_id ON usuarios(rol_id);
 CREATE INDEX IF NOT EXISTS idx_usuarios_estado ON usuarios(estado);
 CREATE INDEX IF NOT EXISTS idx_sesiones_usuario_id ON sesiones_usuario(usuario_id);
 CREATE INDEX IF NOT EXISTS idx_sesiones_expira_en ON sesiones_usuario(expira_en);
+CREATE INDEX IF NOT EXISTS idx_desafios_mfa_usuario_id ON desafios_mfa(usuario_id);
+CREATE INDEX IF NOT EXISTS idx_desafios_mfa_expira_en ON desafios_mfa(expira_en);
 CREATE INDEX IF NOT EXISTS idx_zonas_sede_id ON zonas(sede_id);
 CREATE INDEX IF NOT EXISTS idx_camaras_zona_id ON camaras(zona_id);
 CREATE INDEX IF NOT EXISTS idx_camaras_estado ON camaras(estado);
