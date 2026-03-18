@@ -14,7 +14,10 @@ async function getAuthHeaders() {
 
 export async function apiGet<T>(path: string): Promise<T> {
   const response = await fetch(`${API_BASE_URL}${path}`, {
-    headers: await getAuthHeaders(),
+    headers: {
+      ...(await getAuthHeaders()),
+      "ngrok-skip-browser-warning": "true",
+    },
   });
 
   if (!response.ok) {
@@ -28,6 +31,7 @@ export async function apiSend<T>(path: string, init: RequestInit): Promise<T> {
   const response = await fetch(`${API_BASE_URL}${path}`, {
     headers: {
       "Content-Type": "application/json",
+      "ngrok-skip-browser-warning": "true",
       ...(await getAuthHeaders()),
       ...(init.headers || {}),
     },
