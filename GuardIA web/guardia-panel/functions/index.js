@@ -1,6 +1,7 @@
 const admin = require("firebase-admin");
 const functions = require("firebase-functions/v1");
 const crypto = require("crypto");
+const nodemailer = require("nodemailer");
 
 admin.initializeApp();
 const db = admin.firestore();
@@ -180,43 +181,126 @@ function buildOtpEmailTemplate({ displayName, code }) {
 }
 
 async function sendOtpEmail({ to, displayName, code }) {
-  const apiKey = functions.config().guardia_mail?.api_key || "";
-  const from = functions.config().guardia_mail?.from || "";
-  const allowDebugFallback = String(process.env.FUNCTIONS_EMULATOR || "").toLowerCase() === "true"
-    || String(process.env.GUARDIA_ALLOW_EMAIL_DEBUG_FALLBACK || "true").toLowerCase() === "true";
+  const mailConfig = functions.config().guardia_mail || {};
+  const provider = String(mailConfig.provider || "resend").trim().toLowerCase();
+  const apiKey = String(mailConfig.api_key || "").trim();
+  const from = String(mailConfig.from || "").trim();
+  const replyTo = String(mailConfig.reply_to || "").trim();
+  const allowDebugFallback =
+    String(process.env.FUNCTIONS_EMULATOR || "").toLowerCase() === "true" ||
+    String(process.env.GUARDIA_ALLOW_EMAIL_DEBUG_FALLBACK || "false").toLowerCase() === "true";
+  const subject = "GuardIA | Codigo de acceso";
+  const html = buildOtpEmailTemplate({ displayName, code });
 
-  if (!apiKey || !from) {
+  if (!from) {
     if (allowDebugFallback) {
-      console.log("[GuardIA OTP][EMULATOR]", { to, code });
-      return { debugCode: code };
+      console.log("[GuardIA OTP][DEBUG_FALLBACK_NO_CONFIG]", { provider, to, code });
+      return { debugCode: code, warning: "missing_mail_config" };
     }
     throw new functions.https.HttpsError(
       "failed-precondition",
-      "Configura guardia_mail.api_key y guardia_mail.from para enviar correos OTP.",
+      "Configura guardia_mail.provider y guardia_mail.from para enviar correos OTP.",
     );
   }
 
-  const response = await fetch("https://api.resend.com/emails", {
-    method: "POST",
-    headers: {
-      Authorization: `Bearer ${apiKey}`,
-      "Content-Type": "application/json",
-    },
-    body: JSON.stringify({
-      from,
-      to: [to],
-      subject: "GuardIA | Codigo de acceso",
-      html: buildOtpEmailTemplate({ displayName, code }),
-    }),
-  });
+  const providerHandlers = {
+    resend: async () => {
+      if (!apiKey) {
+        throw new Error("missing guardia_mail.api_key for resend");
+      }
 
-  if (!response.ok) {
-    const responseText = await response.text();
-    console.error("[GuardIA OTP][RESEND_ERROR]", {
-      status: response.status,
+      const response = await fetch("https://api.resend.com/emails", {
+        method: "POST",
+        headers: {
+          Authorization: `Bearer ${apiKey}`,
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({
+          from,
+          to: [to],
+          subject,
+          html,
+          ...(replyTo ? { reply_to: replyTo } : {}),
+        }),
+      });
+
+      if (!response.ok) {
+        throw new Error(await response.text());
+      }
+    },
+    brevo: async () => {
+      if (!apiKey) {
+        throw new Error("missing guardia_mail.api_key for brevo");
+      }
+
+      const response = await fetch("https://api.brevo.com/v3/smtp/email", {
+        method: "POST",
+        headers: {
+          "api-key": apiKey,
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({
+          sender: parseMailbox(from),
+          to: [{ email: to }],
+          subject,
+          htmlContent: html,
+          ...(replyTo ? { replyTo: parseMailbox(replyTo) } : {}),
+        }),
+      });
+
+      if (!response.ok) {
+        throw new Error(await response.text());
+      }
+    },
+    smtp: async () => {
+      const host = String(mailConfig.smtp_host || "").trim();
+      const port = Number(mailConfig.smtp_port || 587);
+      const user = String(mailConfig.smtp_user || "").trim();
+      const pass = String(mailConfig.smtp_pass || "").trim();
+      const secure = String(mailConfig.smtp_secure || "").trim().toLowerCase() === "true" || port === 465;
+
+      if (!host || !port || !user || !pass) {
+        throw new Error("missing SMTP config: guardia_mail.smtp_host, smtp_port, smtp_user, smtp_pass");
+      }
+
+      const transporter = nodemailer.createTransport({
+        host,
+        port,
+        secure,
+        auth: {
+          user,
+          pass,
+        },
+      });
+
+      await transporter.sendMail({
+        from,
+        to,
+        subject,
+        html,
+        ...(replyTo ? { replyTo } : {}),
+      });
+    },
+  };
+
+  const handler = providerHandlers[provider];
+  if (!handler) {
+    throw new functions.https.HttpsError(
+      "failed-precondition",
+      `Proveedor de correo no soportado: ${provider}. Usa resend, brevo o smtp.`,
+    );
+  }
+
+  try {
+    await handler();
+    return {};
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error);
+    console.error("[GuardIA OTP][MAIL_ERROR]", {
+      provider,
       to,
       from,
-      responseText,
+      message,
     });
 
     if (allowDebugFallback) {
@@ -226,10 +310,24 @@ async function sendOtpEmail({ to, displayName, code }) {
       };
     }
 
-    throw new functions.https.HttpsError("internal", "No fue posible enviar el correo de verificacion.");
+    throw new functions.https.HttpsError(
+      "internal",
+      "No fue posible enviar el correo de verificacion. Revisa la configuracion del proveedor de correo.",
+    );
+  }
+}
+
+function parseMailbox(mailbox) {
+  const value = String(mailbox || "").trim();
+  const match = value.match(/^(.*)<([^<>]+)>$/);
+
+  if (!match) {
+    return { email: value };
   }
 
-  return {};
+  const name = match[1].trim().replace(/^"|"$/g, "");
+  const email = match[2].trim();
+  return name ? { name, email } : { email };
 }
 
 exports.createUserByAdmin = functions.region("us-central1").https.onCall(async (data, context) => {
