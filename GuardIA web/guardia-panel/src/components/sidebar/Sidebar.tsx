@@ -75,6 +75,7 @@ export default function Sidebar({
                 <NavItem label="Grabaciones" to="/grabaciones" />
                 {isAdminOrSupervisor && <NavItem label="Camaras" to="/camaras" />}
                 <NavItem label={usersLabel} to="/usuarios" />
+                {isAdminOrSupervisor && <NavItem label="Logs" to="/logs" />}
               </nav>
             </div>
 

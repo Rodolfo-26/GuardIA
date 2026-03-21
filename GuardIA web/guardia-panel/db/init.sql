@@ -1,4 +1,4 @@
-﻿-- GuardIA PostgreSQL - Esquema inicial
+-- GuardIA PostgreSQL - Esquema inicial
 -- Firebase se usa solo para autenticacion; datos operativos viven aqui.
 
 CREATE EXTENSION IF NOT EXISTS "pgcrypto";
@@ -141,7 +141,7 @@ CREATE TABLE IF NOT EXISTS grabaciones (
 
 CREATE TABLE IF NOT EXISTS alertas (
   id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
-  camara_id uuid NOT NULL REFERENCES camaras(id) ON DELETE CASCADE,
+  camara_id uuid REFERENCES camaras(id) ON DELETE CASCADE,
   usuario_asignado_id uuid REFERENCES usuarios(id) ON DELETE SET NULL,
   titulo text NOT NULL,
   tipo_evento text NOT NULL,
@@ -152,6 +152,7 @@ CREATE TABLE IF NOT EXISTS alertas (
   detectada_en timestamptz NOT NULL DEFAULT now(),
   resuelta_en timestamptz,
   creado_en timestamptz NOT NULL DEFAULT now(),
+  metadata jsonb DEFAULT '{}'::jsonb,
   CHECK (resuelta_en IS NULL OR resuelta_en >= detectada_en)
 );
 

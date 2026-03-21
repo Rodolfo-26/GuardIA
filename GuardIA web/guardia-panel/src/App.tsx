@@ -10,6 +10,7 @@ import GrabacionesPage from "./pages/GrabacionesPage";
 import UsuariosPage from "./pages/UsuariosPage";
 import CamerasPage from "./pages/camaras/CamerasPage";
 import Login from "./pages/login/Login";
+import LogsPage from "./pages/LogsPage";
 import Monitoreo from "./pages/Monitoreo";
 import ProtectedRoute from "./routes/ProtectedRoute";
 import RoleRoute from "./routes/RoleRoute";
@@ -65,6 +66,14 @@ export default function App() {
           <Route path="/alertas" element={<AlertasPage />} />
           <Route path="/grabaciones" element={<GrabacionesPage />} />
           <Route path="/usuarios" element={<UsuariosPage />} />
+          <Route
+            path="/logs"
+            element={
+              <RoleRoute allowedRoles={["Admin", "Supervisor"]}>
+                <LogsPage />
+              </RoleRoute>
+            }
+          />
         </Route>
 
         <Route path="*" element={<Navigate to="/dashboard" replace />} />

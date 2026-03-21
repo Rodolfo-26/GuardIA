@@ -19,8 +19,8 @@ const alertsBaseQuery = `
     latest_action.tipo_accion AS latest_action_type,
     latest_action.creado_en AS latest_action_at
   FROM alertas a
-  JOIN camaras c ON c.id = a.camara_id
-  JOIN zonas z ON z.id = c.zona_id
+  LEFT JOIN camaras c ON c.id = a.camara_id
+  LEFT JOIN zonas z ON z.id = c.zona_id
   LEFT JOIN usuarios u ON u.id = a.usuario_asignado_id
   LEFT JOIN LATERAL (
     SELECT aa.tipo_accion, aa.nota, aa.creado_en
@@ -96,4 +96,16 @@ export async function updateAlertWorkflow({ alertId, assigneeUid, status, note }
     await query("ROLLBACK");
     throw error;
   }
+}
+
+export async function createAlertFromMobile({ title, type, severity, description, metadata }) {
+  const result = await query(
+    `
+      INSERT INTO alertas (titulo, tipo_evento, severidad, descripcion, metadata)
+      VALUES ($1, $2, $3::severidad_alerta, $4, $5::jsonb)
+      RETURNING id
+    `,
+    [title, type, severity, description, metadata || {}]
+  );
+  return result.rows[0].id;
 }
