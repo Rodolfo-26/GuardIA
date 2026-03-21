@@ -16,6 +16,7 @@ import {
 import { serializeAudit, serializeUser } from "./serializers.js";
 import { listAlerts, updateAlertWorkflow } from "./repositories/alertsRepository.js";
 import { createCamera, listCameras, updateCamera } from "./repositories/camerasRepository.js";
+import { listRecordings } from "./repositories/recordingsRepository.js";
 
 dotenv.config();
 
@@ -128,6 +129,15 @@ app.patch("/alerts/:id/workflow", requireAuth, requireRole(["Admin", "Supervisor
 app.get("/cameras", requireAuth, async (_req, res, next) => {
   try {
     const items = await listCameras();
+    res.json({ items });
+  } catch (error) {
+    next(error);
+  }
+});
+
+app.get("/recordings", requireAuth, async (_req, res, next) => {
+  try {
+    const items = await listRecordings();
     res.json({ items });
   } catch (error) {
     next(error);

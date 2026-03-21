@@ -1,7 +1,6 @@
 import type { User } from "firebase/auth";
 import { httpsCallable } from "firebase/functions";
-import { doc, getDoc, increment, runTransaction, serverTimestamp, setDoc, type Unsubscribe } from "firebase/firestore";
-import { firebaseDb, firebaseFunctions } from "../lib/firebase";
+import { firebaseFunctions } from "../lib/firebase";
 import { apiGet, apiSend } from "./apiClient";
 
 export type AppUserRole = "Admin" | "Operador" | "Supervisor";
@@ -19,18 +18,6 @@ export type AppUserRecord = {
   alertsHandled: number;
 };
 
-type FirestoreUserDoc = {
-  displayName?: string;
-  email?: string;
-  role?: AppUserRole;
-  status?: AppUserStatus;
-  site?: string;
-  sessions?: number;
-  alertsHandled?: number;
-  lastAccessAt?: { toDate?: () => Date } | null;
-};
-
-const USERS_COLLECTION = "usuarios";
 export type UserAuditRecord = {
   id: string;
   action: string;
@@ -42,29 +29,7 @@ export type UserAuditRecord = {
   createdAt: string;
 };
 
-function formatLastAccess(value?: { toDate?: () => Date } | null) {
-  if (!value || typeof value.toDate !== "function") return "Sin registro";
-  return value.toDate().toLocaleTimeString("es-CO", { hour: "2-digit", minute: "2-digit" });
-}
-
-function toRecord(id: string, data: FirestoreUserDoc): AppUserRecord {
-  return {
-    id,
-    fullName: data.displayName ?? "Sin nombre",
-    email: data.email ?? "sin-correo",
-    role: data.role ?? "Operador",
-    status: data.status ?? "Activo",
-    site: data.site ?? "Sin sede",
-    lastAccess: formatLastAccess(data.lastAccessAt ?? null),
-    sessions: data.sessions ?? 0,
-    alertsHandled: data.alertsHandled ?? 0,
-  };
-}
-
-function formatAuditDate(value?: { toDate?: () => Date } | null) {
-  if (!value || typeof value.toDate !== "function") return "Ahora";
-  return value.toDate().toLocaleString("es-CO", { hour: "2-digit", minute: "2-digit", day: "2-digit", month: "2-digit" });
-}
+type Unsubscribe = () => void;
 
 async function fetchUsers() {
   const response = await apiGet<{ items: AppUserRecord[] }>("/users");
@@ -79,6 +44,18 @@ async function fetchUserById(userId: string) {
 async function fetchRecentAuditLogs() {
   const response = await apiGet<{ items: UserAuditRecord[] }>("/audit/users?limit=5");
   return response.items;
+}
+
+export async function fetchUsersList() {
+  return fetchUsers();
+}
+
+export async function fetchCurrentUserProfile(userId: string) {
+  return fetchUserById(userId);
+}
+
+export async function fetchRecentUserAuditLogs() {
+  return fetchRecentAuditLogs();
 }
 
 async function createUserProfileInApi(input: {
@@ -143,88 +120,19 @@ export function subscribeUserAuditLogs(
 }
 
 export async function ensureUserProfile(user: User) {
-  const userRef = doc(firebaseDb, USERS_COLLECTION, user.uid);
-  await runTransaction(firebaseDb, async (tx) => {
-    const snap = await tx.get(userRef);
-
-    if (!snap.exists()) {
-      tx.set(
-        userRef,
-        {
-          displayName: user.displayName || user.email?.split("@")[0] || "Usuario",
-          email: user.email || "",
-          role: "Operador" as AppUserRole,
-          status: "Activo" as AppUserStatus,
-          site: "Sede Principal",
-          sessions: 0,
-          alertsHandled: 0,
-          createdAt: serverTimestamp(),
-          updatedAt: serverTimestamp(),
-        },
-        { merge: true },
-      );
-      return;
-    }
-
-    const data = snap.data();
-    tx.set(
-      userRef,
-      {
-        displayName: data.displayName || user.displayName || user.email?.split("@")[0] || "Usuario",
-        email: data.email || user.email || "",
-        updatedAt: serverTimestamp(),
-      },
-      { merge: true },
-    );
-  });
+  try {
+    await fetchUserById(user.uid);
+  } catch {
+    // La sincronizacion del perfil ya no se hace desde el frontend.
+  }
 }
 
-export async function registerUserLogin(user: User) {
-  const userRef = doc(firebaseDb, USERS_COLLECTION, user.uid);
-
-  await setDoc(
-    userRef,
-    {
-      displayName: user.displayName || user.email?.split("@")[0] || "Usuario",
-      email: user.email || "",
-      lastAccessAt: serverTimestamp(),
-      sessions: increment(1),
-      updatedAt: serverTimestamp(),
-    },
-    { merge: true },
-  );
+export async function registerUserLogin(_user: User) {
+  // El seguimiento de ultimo acceso y sesiones activas se consolida en backend.
 }
 
-export async function registerUserLogout(user: User) {
-  const userRef = doc(firebaseDb, USERS_COLLECTION, user.uid);
-
-  await runTransaction(firebaseDb, async (tx) => {
-    const snap = await tx.get(userRef);
-    if (!snap.exists()) {
-      tx.set(
-        userRef,
-        {
-          displayName: user.displayName || user.email?.split("@")[0] || "Usuario",
-          email: user.email || "",
-          role: "Operador" as AppUserRole,
-          status: "Activo" as AppUserStatus,
-          site: "Sede Principal",
-          sessions: 0,
-          alertsHandled: 0,
-          updatedAt: serverTimestamp(),
-          createdAt: serverTimestamp(),
-        },
-        { merge: true },
-      );
-      return;
-    }
-
-    const currentSessions = Number(snap.data().sessions ?? 0);
-    tx.update(userRef, {
-      sessions: Math.max(0, currentSessions - 1),
-      updatedAt: serverTimestamp(),
-    });
-  });
+export async function registerUserLogout(_user: User) {
+  // El seguimiento de ultimo acceso y sesiones activas se consolida en backend.
 }
 
 export async function updateUserRole(userId: string, role: AppUserRole) {
@@ -301,20 +209,11 @@ export async function createUserWithAuth(input: {
   return response.data.uid;
 }
 
-export async function syncMyRoleClaim() {
-  const callable = httpsCallable<undefined, { appRole: AppUserRole }>(
-    firebaseFunctions,
-    "syncMyRoleClaim",
-  );
-  const response = await callable();
-  return response.data.appRole;
-}
-
 export async function getUserRoleFromProfile(userId: string): Promise<AppUserRole | null> {
-  const ref = doc(firebaseDb, USERS_COLLECTION, userId);
-  const snap = await getDoc(ref);
-  if (!snap.exists()) return null;
-  const role = (snap.data() as FirestoreUserDoc).role;
-  if (role === "Admin" || role === "Supervisor" || role === "Operador") return role;
-  return null;
+  try {
+    const item = await fetchUserById(userId);
+    return item.role;
+  } catch {
+    return null;
+  }
 }

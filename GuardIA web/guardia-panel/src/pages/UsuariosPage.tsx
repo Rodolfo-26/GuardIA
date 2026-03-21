@@ -3,7 +3,6 @@ import { EmailAuthProvider, reauthenticateWithCredential } from "firebase/auth";
 import {
   closeUserSessions,
   createUserWithAuth,
-  syncMyRoleClaim,
   subscribeCurrentUser,
   subscribeUserAuditLogs,
   subscribeUsers,
@@ -29,6 +28,7 @@ export default function UsuariosPage() {
   const [error, setError] = useState("");
   const [viewMode, setViewMode] = useState<"full" | "self">("full");
   const [actionError, setActionError] = useState("");
+  const [actionSuccess, setActionSuccess] = useState("");
   const [query, setQuery] = useState("");
   const [statusFilter, setStatusFilter] = useState<AppUserStatus | "Todos">("Todos");
   const [roleFilter, setRoleFilter] = useState<AppUserRole | "Todos">("Todos");
@@ -70,16 +70,8 @@ export default function UsuariosPage() {
 
               const selfRole = items[0]?.role;
               if (selfRole === "Admin" || selfRole === "Supervisor") {
-                // Si en perfil ya es Admin/Supervisor, re-sincronizamos claims y reintentamos listado global.
+                // Si en API ya es Admin/Supervisor, reintentamos listado global sin depender de Firestore.
                 void (async () => {
-                  try {
-                    await syncMyRoleClaim();
-                    if (user) {
-                      await user.getIdToken(true);
-                    }
-                  } catch {
-                    // mantenemos fallback si falla la sincronizacion.
-                  }
                   if (!retryUnsubscribe) {
                     retryUnsubscribe = subscribeUsers(
                       (fullItems) => {
@@ -102,13 +94,13 @@ export default function UsuariosPage() {
             },
             () => {
               setIsLoading(false);
-              setError("No fue posible cargar usuarios desde Firebase.");
+              setError("No fue posible cargar usuarios desde la API.");
             },
           );
           return;
         }
         setIsLoading(false);
-        setError("No fue posible cargar usuarios desde Firebase.");
+        setError("No fue posible cargar usuarios desde la API.");
       },
     );
 
@@ -138,6 +130,12 @@ export default function UsuariosPage() {
 
     return () => unsubscribe();
   }, [viewMode]);
+
+  useEffect(() => {
+    if (!actionSuccess) return;
+    const timer = window.setTimeout(() => setActionSuccess(""), 3200);
+    return () => window.clearTimeout(timer);
+  }, [actionSuccess]);
 
   const filtered = useMemo(() => {
     const normalized = query.trim().toLowerCase();
@@ -212,6 +210,7 @@ export default function UsuariosPage() {
 
   async function withAction(run: () => Promise<void>) {
     setActionError("");
+    setActionSuccess("");
     try {
       await run();
     } catch (err) {
@@ -220,14 +219,17 @@ export default function UsuariosPage() {
         setActionError("No tienes permisos para ejecutar esta accion.");
         return;
       }
-      setActionError(raw || "No se pudo completar la accion en Firebase.");
+      setActionError(raw || "No se pudo completar la accion en la API.");
     }
   }
 
   function handleToggleStatus() {
     if (!selected) return;
     const nextStatus: AppUserStatus = selected.status === "Activo" ? "Inactivo" : "Activo";
-    void withAction(() => updateUserStatus(selected.id, nextStatus));
+    void withAction(async () => {
+      await updateUserStatus(selected.id, nextStatus);
+      setActionSuccess(`Estado actualizado a ${nextStatus}.`);
+    });
   }
 
   function handleRoleChange(nextRole: AppUserRole) {
@@ -241,7 +243,10 @@ export default function UsuariosPage() {
 
   function handleCloseSessions() {
     if (!selected) return;
-    void withAction(() => closeUserSessions(selected.id));
+    void withAction(async () => {
+      await closeUserSessions(selected.id);
+      setActionSuccess("Las sesiones activas se cerraron correctamente.");
+    });
   }
 
   async function handleCreateUser(draft: {
@@ -258,6 +263,7 @@ export default function UsuariosPage() {
     }
 
     const newId = await createUserWithAuth(draft);
+    setActionSuccess("Usuario creado correctamente.");
     setPendingSelectId(newId);
   }
 
@@ -329,6 +335,12 @@ export default function UsuariosPage() {
       {actionError && (
         <div className="rounded-xl border border-amber-400/30 bg-amber-500/10 px-4 py-3 text-sm text-amber-200">
           {actionError}
+        </div>
+      )}
+
+      {actionSuccess && (
+        <div className="rounded-xl border border-emerald-400/30 bg-emerald-500/10 px-4 py-3 text-sm text-emerald-200">
+          {actionSuccess}
         </div>
       )}
 
@@ -553,6 +565,7 @@ export default function UsuariosPage() {
             try {
               await updateUserRole(current.targetId, current.nextRole);
               setActionError("");
+              setActionSuccess(`Rol actualizado a ${current.nextRole}.`);
               setRoleVerification(null);
             } catch (err) {
               const raw = err instanceof Error ? err.message : "";

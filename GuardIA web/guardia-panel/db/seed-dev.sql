@@ -101,6 +101,28 @@ cam_2 AS (
 ),
 cam_3 AS (
   SELECT id FROM camaras WHERE codigo = 'CAM-003' LIMIT 1
+)
+INSERT INTO grabaciones (camara_id, ruta_archivo, inicio_en, fin_en, duracion_seg, tamano_mb, checksum, archivada)
+SELECT cam_1.id, 'https://storage.guardia.local/records/CAM-001/clip-20260321-001.mp4', now() - interval '12 minutes', now() - interval '11 minutes 13 seconds', 47, 18.40, 'chk-cam001-001', false
+FROM cam_1
+WHERE NOT EXISTS (SELECT 1 FROM grabaciones WHERE ruta_archivo = 'https://storage.guardia.local/records/CAM-001/clip-20260321-001.mp4')
+UNION ALL
+SELECT cam_2.id, 'https://storage.guardia.local/records/CAM-002/clip-20260321-002.mp4', now() - interval '31 minutes', now() - interval '29 minutes 37 seconds', 83, 31.15, 'chk-cam002-002', false
+FROM cam_2
+WHERE NOT EXISTS (SELECT 1 FROM grabaciones WHERE ruta_archivo = 'https://storage.guardia.local/records/CAM-002/clip-20260321-002.mp4')
+UNION ALL
+SELECT cam_3.id, 'https://storage.guardia.local/records/CAM-003/clip-20260321-003.mp4', now() - interval '42 minutes', now() - interval '41 minutes 29 seconds', 31, 12.75, 'chk-cam003-003', true
+FROM cam_3
+WHERE NOT EXISTS (SELECT 1 FROM grabaciones WHERE ruta_archivo = 'https://storage.guardia.local/records/CAM-003/clip-20260321-003.mp4');
+
+WITH cam_1 AS (
+  SELECT id FROM camaras WHERE codigo = 'CAM-001' LIMIT 1
+),
+cam_2 AS (
+  SELECT id FROM camaras WHERE codigo = 'CAM-002' LIMIT 1
+),
+cam_3 AS (
+  SELECT id FROM camaras WHERE codigo = 'CAM-003' LIMIT 1
 ),
 admin_user AS (
   SELECT id FROM usuarios WHERE firebase_uid = 'firebase-admin-01' LIMIT 1
@@ -164,3 +186,46 @@ UNION ALL
 SELECT alert_3.id, operator_user.id, 'registrar', 'No coincide con lista de personal autorizado.', now() - interval '30 minutes'
 FROM alert_3, operator_user
 WHERE NOT EXISTS (SELECT 1 FROM acciones_alerta WHERE alerta_id = alert_3.id);
+
+WITH alert_1 AS (
+  SELECT id FROM alertas WHERE titulo = 'Ingreso no autorizado' LIMIT 1
+),
+alert_2 AS (
+  SELECT id FROM alertas WHERE titulo = 'Objeto abandonado' LIMIT 1
+),
+alert_3 AS (
+  SELECT id FROM alertas WHERE titulo = 'Rostro no reconocido' LIMIT 1
+),
+rec_1 AS (
+  SELECT id FROM grabaciones WHERE ruta_archivo = 'https://storage.guardia.local/records/CAM-001/clip-20260321-001.mp4' LIMIT 1
+),
+rec_2 AS (
+  SELECT id FROM grabaciones WHERE ruta_archivo = 'https://storage.guardia.local/records/CAM-002/clip-20260321-002.mp4' LIMIT 1
+),
+rec_3 AS (
+  SELECT id FROM grabaciones WHERE ruta_archivo = 'https://storage.guardia.local/records/CAM-003/clip-20260321-003.mp4' LIMIT 1
+)
+INSERT INTO vinculos_evidencia (alerta_id, grabacion_id, clip_inicio_en, clip_fin_en, motivo)
+SELECT alert_1.id, rec_1.id, now() - interval '12 minutes', now() - interval '11 minutes 13 seconds', 'Cruce de perimetro detectado en carril restringido.'
+FROM alert_1, rec_1
+WHERE NOT EXISTS (
+  SELECT 1
+  FROM vinculos_evidencia
+  WHERE alerta_id = alert_1.id AND grabacion_id = rec_1.id
+)
+UNION ALL
+SELECT alert_2.id, rec_2.id, now() - interval '31 minutes', now() - interval '29 minutes 37 seconds', 'Objeto inmovil validado cerca de zona de maniobra.'
+FROM alert_2, rec_2
+WHERE NOT EXISTS (
+  SELECT 1
+  FROM vinculos_evidencia
+  WHERE alerta_id = alert_2.id AND grabacion_id = rec_2.id
+)
+UNION ALL
+SELECT alert_3.id, rec_3.id, now() - interval '42 minutes', now() - interval '41 minutes 29 seconds', 'Intento de acceso sin coincidencia biometrica.'
+FROM alert_3, rec_3
+WHERE NOT EXISTS (
+  SELECT 1
+  FROM vinculos_evidencia
+  WHERE alerta_id = alert_3.id AND grabacion_id = rec_3.id
+);

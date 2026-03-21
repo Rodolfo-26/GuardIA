@@ -7,7 +7,6 @@ import {
   getUserRoleFromProfile,
   registerUserLogin,
   registerUserLogout,
-  syncMyRoleClaim,
   type AppUserRole,
 } from "../services/users";
 
@@ -36,18 +35,23 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     return `guardia-email-2fa:${uid}`;
   }
 
+  function getSecondFactorPendingKey(uid: string) {
+    return `guardia-email-2fa-pending:${uid}`;
+  }
+
   async function hydrateUserSecurity(nextUser: User) {
     try {
       await ensureUserProfile(nextUser);
-      await syncMyRoleClaim();
-      await nextUser.getIdToken(true);
       const tokenResult = await nextUser.getIdTokenResult();
       const role = tokenResult.claims.appRole;
-      setAppRole(
-        role === "Admin" || role === "Supervisor" || role === "Operador"
-          ? (role as AppUserRole)
-          : "Operador",
-      );
+
+      if (role === "Admin" || role === "Supervisor" || role === "Operador") {
+        setAppRole(role as AppUserRole);
+        return;
+      }
+
+      const profileRole = await getUserRoleFromProfile(nextUser.uid);
+      setAppRole(profileRole ?? "Operador");
     } catch (error) {
       // No bloquea sesion autenticada por fallos operativos secundarios.
       console.error("No fue posible sincronizar el perfil de seguridad:", error);
@@ -80,6 +84,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     try {
       const credentials = await signInWithEmailAndPassword(firebaseAuth, email, password);
       window.sessionStorage.removeItem(getSecondFactorStorageKey(credentials.user.uid));
+      window.sessionStorage.removeItem(getSecondFactorPendingKey(credentials.user.uid));
       setIsSecondFactorVerified(false);
       try {
         await registerUserLogin(credentials.user);
@@ -163,6 +168,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   async function logout() {
     if (firebaseAuth.currentUser) {
       window.sessionStorage.removeItem(getSecondFactorStorageKey(firebaseAuth.currentUser.uid));
+      window.sessionStorage.removeItem(getSecondFactorPendingKey(firebaseAuth.currentUser.uid));
       try {
         await registerUserLogout(firebaseAuth.currentUser);
       } catch (error) {

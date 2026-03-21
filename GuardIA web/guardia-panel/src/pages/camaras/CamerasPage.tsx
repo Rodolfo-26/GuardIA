@@ -9,6 +9,7 @@ export default function CamerasPage() {
   const [cameras, setCameras] = useState<CameraRecord[]>([]);
   const [isLoading, setIsLoading] = useState(true);
   const [error, setError] = useState("");
+  const [success, setSuccess] = useState("");
   const [query, setQuery] = useState("");
   const [statusFilter, setStatusFilter] = useState<"all" | CameraRecord["status"]>("all");
   const [modalOpen, setModalOpen] = useState(false);
@@ -24,6 +25,12 @@ export default function CamerasPage() {
       .catch(() => setError("No fue posible cargar camaras desde PostgreSQL."))
       .finally(() => setIsLoading(false));
   }, []);
+
+  useEffect(() => {
+    if (!success) return;
+    const timer = window.setTimeout(() => setSuccess(""), 3200);
+    return () => window.clearTimeout(timer);
+  }, [success]);
 
   const filtered = useMemo(() => {
     const normalized = query.trim().toLowerCase();
@@ -77,9 +84,11 @@ export default function CamerasPage() {
       if (existingId) {
         await updateCameraRecord(existingId, draft);
         setCameras((prev) => prev.map((cam) => (cam.id === existingId ? { ...cam, ...draft, status: "online" } : cam)));
+        setSuccess("Camara actualizada correctamente.");
       } else {
         const created = await createCameraRecord(draft);
         setCameras((prev) => [{ id: created.id, status: "online", ...draft }, ...prev]);
+        setSuccess("Camara registrada correctamente.");
       }
 
       setError("");
@@ -152,12 +161,12 @@ export default function CamerasPage() {
           </div>
         </div>
 
-        <div className="mt-4 grid gap-3 md:grid-cols-2">
+      <div className="mt-4 grid gap-3 md:grid-cols-2">
           {isLoading ? (
             <p className="rounded-xl border border-slate-700 bg-slate-950/70 p-3 text-sm text-slate-300">
               Cargando camaras...
             </p>
-          ) : filtered.map((cam, index) => (
+          ) : filtered.length ? filtered.map((cam, index) => (
             <article
               key={cam.id}
               className="rounded-2xl border border-cyan-300/15 bg-slate-950/65 p-3.5 transition hover:-translate-y-0.5"
@@ -204,13 +213,23 @@ export default function CamerasPage() {
                 </div>
               </footer>
             </article>
-          ))}
+          )) : (
+            <p className="rounded-xl border border-slate-700 bg-slate-950/70 p-3 text-sm text-slate-300">
+              No hay camaras con los filtros seleccionados.
+            </p>
+          )}
         </div>
       </div>
 
       {error ? (
         <div className="rounded-xl border border-rose-400/30 bg-rose-500/10 px-4 py-3 text-sm text-rose-200">
           {error}
+        </div>
+      ) : null}
+
+      {success ? (
+        <div className="rounded-xl border border-emerald-400/30 bg-emerald-500/10 px-4 py-3 text-sm text-emerald-200">
+          {success}
         </div>
       ) : null}
 

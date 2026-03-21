@@ -7,6 +7,7 @@ export default function AlertasPage() {
   const [alerts, setAlerts] = useState<AlertItem[]>([]);
   const [isLoading, setIsLoading] = useState(true);
   const [error, setError] = useState("");
+  const [success, setSuccess] = useState("");
   const [query, setQuery] = useState("");
   const [status, setStatus] = useState<AlertStatus | "Todas">("Todas");
   const [level, setLevel] = useState<AlertLevel | "Todas">("Todas");
@@ -25,6 +26,12 @@ export default function AlertasPage() {
       })
       .finally(() => setIsLoading(false));
   }, []);
+
+  useEffect(() => {
+    if (!success) return;
+    const timer = window.setTimeout(() => setSuccess(""), 3200);
+    return () => window.clearTimeout(timer);
+  }, [success]);
 
   const filtered = useMemo(() => {
     const normalized = query.trim().toLowerCase();
@@ -92,6 +99,7 @@ export default function AlertasPage() {
   function handleWorkflowSaved(updated: AlertItem) {
     setAlerts((current) => current.map((item) => (item.id === updated.id ? updated : item)));
     setWorkflowId(null);
+    setSuccess("Flujo de alerta actualizado correctamente.");
   }
 
   return (
@@ -149,6 +157,12 @@ export default function AlertasPage() {
       {error ? (
         <div className="rounded-xl border border-rose-400/30 bg-rose-500/10 px-4 py-3 text-sm text-rose-200">
           {error}
+        </div>
+      ) : null}
+
+      {success ? (
+        <div className="rounded-xl border border-emerald-400/30 bg-emerald-500/10 px-4 py-3 text-sm text-emerald-200">
+          {success}
         </div>
       ) : null}
 
@@ -414,8 +428,8 @@ function AlertWorkflowModal({
         notes: note || alert.notes,
         lastUpdate: "Hace 1 min",
       });
-    } catch {
-      setError("No fue posible guardar el flujo en PostgreSQL.");
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "No fue posible guardar el flujo en PostgreSQL.");
     } finally {
       setIsSaving(false);
     }

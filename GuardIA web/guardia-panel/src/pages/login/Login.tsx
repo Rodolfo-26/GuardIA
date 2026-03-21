@@ -1,6 +1,7 @@
 import { useEffect, useState, type MouseEvent } from "react";
 import { useNavigate } from "react-router-dom";
 import { useAuth } from "../../context/AuthContext";
+import { firebaseAuth } from "../../lib/firebase";
 
 const packets = [
   { left: "8%", top: "15%", delay: "0s", duration: "8.5s" },
@@ -21,6 +22,8 @@ export default function Login() {
     beginEmailSecondFactor,
     verifyEmailSecondFactor,
     sendResetPassword,
+    logout,
+    user,
     isAuthenticated,
     isAuthReady,
     isSecondFactorVerified,
@@ -29,6 +32,7 @@ export default function Login() {
 
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
+  const [showPassword, setShowPassword] = useState(false);
   const [rememberMe, setRememberMe] = useState(false);
   const [otpCode, setOtpCode] = useState("");
   const [step, setStep] = useState<"credentials" | "otp" | "recovery">("credentials");
@@ -39,6 +43,11 @@ export default function Login() {
   const [otpExpiresIn, setOtpExpiresIn] = useState(0);
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [pointer, setPointer] = useState({ x: 50, y: 50 });
+
+  function getSecondFactorPendingKey(uid: string) {
+    return `guardia-email-2fa-pending:${uid}`;
+  }
+
   const stepMeta = {
     credentials: {
       eyebrow: "Secure Access",
@@ -78,10 +87,20 @@ export default function Login() {
   }, [isAuthenticated, isAuthReady, isSecondFactorVerified, navigate]);
 
   useEffect(() => {
-    if (isAuthenticated && !isSecondFactorVerified) {
+    if (!isAuthReady || !isAuthenticated || !user) return;
+    if (isSecondFactorVerified) return;
+
+    const hasPendingChallenge =
+      window.sessionStorage.getItem(getSecondFactorPendingKey(user.uid)) === "pending";
+
+    if (hasPendingChallenge) {
       setStep("otp");
+      return;
     }
-  }, [isAuthenticated, isSecondFactorVerified]);
+
+    setStep("credentials");
+    void logout();
+  }, [isAuthenticated, isAuthReady, isSecondFactorVerified, logout, user]);
 
   useEffect(() => {
     if (!otpExpiresIn) return;
@@ -98,6 +117,11 @@ export default function Login() {
     const result = await login(email, password);
 
     if (result.ok) {
+      const pendingUid = firebaseAuth.currentUser?.uid;
+      if (pendingUid) {
+        window.sessionStorage.setItem(getSecondFactorPendingKey(pendingUid), "pending");
+      }
+
       if (rememberMe) {
         window.localStorage.setItem("guardia-remember-email", email.trim());
       } else {
@@ -108,6 +132,9 @@ export default function Login() {
       setIsSubmitting(false);
 
       if (!otpResult.ok) {
+        if (pendingUid) {
+          window.sessionStorage.removeItem(getSecondFactorPendingKey(pendingUid));
+        }
         setError(otpResult.message ?? "No se pudo enviar el codigo de verificacion.");
         return;
       }
@@ -152,6 +179,9 @@ export default function Login() {
     const result = await verifyEmailSecondFactor(otpCode.trim());
     setIsSubmitting(false);
     if (result.ok) {
+      if (currentUser) {
+        window.sessionStorage.removeItem(getSecondFactorPendingKey(currentUser.uid));
+      }
       navigate("/dashboard", { replace: true });
       return;
     }
@@ -365,14 +395,53 @@ export default function Login() {
               <span className="text-xs font-semibold uppercase tracking-widest text-slate-300">
                 Contrasena
               </span>
-              <input
-                type="password"
-                placeholder="Ingresa tu contrasena"
-                className="rounded-xl border border-slate-700 bg-slate-950/80 px-4 py-3 text-slate-100 outline-none transition focus:border-cyan-300 focus:ring-2 focus:ring-cyan-400/30"
-                value={password}
-                onChange={(e) => setPassword(e.target.value)}
-                required
-              />
+              <div className="flex items-center rounded-xl border border-slate-700 bg-slate-950/80 transition focus-within:border-cyan-300 focus-within:ring-2 focus-within:ring-cyan-400/30">
+                <input
+                  type={showPassword ? "text" : "password"}
+                  placeholder="Ingresa tu contrasena"
+                  className="w-full rounded-l-xl bg-transparent px-4 py-3 text-slate-100 outline-none"
+                  value={password}
+                  onChange={(e) => setPassword(e.target.value)}
+                  required
+                />
+                <button
+                  type="button"
+                  onClick={() => setShowPassword((current) => !current)}
+                  className="mr-2 rounded-lg px-2.5 py-2 text-cyan-200 transition hover:bg-white/5 hover:text-white"
+                  aria-label={showPassword ? "Ocultar contrasena" : "Mostrar contrasena"}
+                  title={showPassword ? "Ocultar contrasena" : "Mostrar contrasena"}
+                >
+                  {showPassword ? (
+                    <svg aria-hidden="true" viewBox="0 0 24 24" className="h-5 w-5 fill-none stroke-current stroke-[1.8]">
+                      <path d="M3 3l18 18" strokeLinecap="round" />
+                      <path
+                        d="M10.6 10.7A3 3 0 0 0 12 15a3 3 0 0 0 2.3-1"
+                        strokeLinecap="round"
+                        strokeLinejoin="round"
+                      />
+                      <path
+                        d="M9.5 5.4A10.9 10.9 0 0 1 12 5c5.2 0 8.7 4.4 9.7 6-.5.9-1.7 2.6-3.7 4"
+                        strokeLinecap="round"
+                        strokeLinejoin="round"
+                      />
+                      <path
+                        d="M6.2 6.2C3.9 7.7 2.5 9.8 2 11c1 1.6 4.5 6 10 6 1.4 0 2.6-.3 3.7-.7"
+                        strokeLinecap="round"
+                        strokeLinejoin="round"
+                      />
+                    </svg>
+                  ) : (
+                    <svg aria-hidden="true" viewBox="0 0 24 24" className="h-5 w-5 fill-none stroke-current stroke-[1.8]">
+                      <path
+                        d="M2 12s3.5-6 10-6 10 6 10 6-3.5 6-10 6S2 12 2 12Z"
+                        strokeLinecap="round"
+                        strokeLinejoin="round"
+                      />
+                      <circle cx="12" cy="12" r="3" />
+                    </svg>
+                  )}
+                </button>
+              </div>
             </label>
 
             <div className="flex items-center justify-between gap-3">
@@ -535,6 +604,10 @@ export default function Login() {
               <button
                 type="button"
                 onClick={() => {
+                  if (user) {
+                    window.sessionStorage.removeItem(getSecondFactorPendingKey(user.uid));
+                  }
+                  void logout();
                   setStep("credentials");
                   setOtpCode("");
                   setError("");

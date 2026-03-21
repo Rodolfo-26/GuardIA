@@ -1,67 +1,58 @@
-﻿import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
+import { fetchCameras, type CameraRecord } from "../services/cameras";
 import CameraConfigModal from "./components/CameraConfigModal";
 import CameraFullscreenModal from "./components/CameraFullscreenModal";
 import VideoTile from "./components/VideoTile";
 import type { Camera } from "./components/VideoTile";
 
-const INITIAL_CAMERAS: Camera[] = [
-  {
-    id: "c1",
-    name: "Entrada principal",
-    location: "Puerta frontal",
-    status: "live",
-    latencyMs: 120,
-    lastSeen: "11:06",
-    recording: true,
-    sensitivity: 64,
-    streamUrl: "http://admin:admin@192.168.100.145:8081/video",
-  },
-  {
-    id: "c2",
-    name: "Estacionamiento",
-    location: "Area de vehiculos",
-    status: "live",
-    latencyMs: 108,
-    lastSeen: "11:08",
-    recording: true,
-    sensitivity: 70,
-    streamUrl: "",
-  },
-  {
-    id: "c3",
-    name: "Pasillo A",
-    location: "Zona interior",
-    status: "live",
-    latencyMs: 134,
-    lastSeen: "11:07",
-    recording: false,
-    sensitivity: 55,
-    streamUrl: "",
-  },
-  {
-    id: "c4",
-    name: "Bodega",
-    location: "Acceso trasero",
-    status: "offline",
-    latencyMs: 0,
-    lastSeen: "10:42",
-    recording: false,
-    sensitivity: 48,
-    streamUrl: "",
-  },
-];
+function toMonitoringCamera(camera: CameraRecord): Camera {
+  const offline = camera.status === "offline";
+
+  return {
+    id: camera.id,
+    name: camera.name,
+    location: camera.zone,
+    status: offline ? "offline" : "live",
+    latencyMs: offline ? 0 : 90 + Math.min(130, camera.aiProfiles.length * 12 + camera.retentionDays),
+    lastSeen: offline ? "Sin conexion" : "Activo",
+    recording: camera.retentionDays > 0,
+    sensitivity: Math.max(35, Math.min(95, 45 + camera.aiProfiles.length * 10)),
+    streamUrl: camera.streamUrl,
+  };
+}
 
 export default function Monitoreo() {
   const [query, setQuery] = useState("");
-  const [cameras, setCameras] = useState<Camera[]>(INITIAL_CAMERAS);
-  const [playing, setPlaying] = useState<Record<string, boolean>>({
-    c1: true,
-    c2: true,
-    c3: true,
-    c4: false,
-  });
+  const [cameras, setCameras] = useState<Camera[]>([]);
+  const [playing, setPlaying] = useState<Record<string, boolean>>({});
   const [fullscreenId, setFullscreenId] = useState<string | null>(null);
   const [configId, setConfigId] = useState<string | null>(null);
+  const [isLoading, setIsLoading] = useState(true);
+  const [error, setError] = useState("");
+
+  async function loadCameras() {
+    try {
+      const items = await fetchCameras();
+      const mapped = items.map(toMonitoringCamera);
+      setCameras(mapped);
+      setPlaying((prev) => {
+        const next: Record<string, boolean> = {};
+        mapped.forEach((camera) => {
+          next[camera.id] = prev[camera.id] ?? camera.status !== "offline";
+        });
+        return next;
+      });
+      setError("");
+    } catch {
+      setError("No fue posible cargar el monitoreo en tiempo real desde la API.");
+    } finally {
+      setIsLoading(false);
+    }
+  }
+
+  useEffect(() => {
+    void loadCameras();
+  }, []);
 
   const filtered = useMemo(() => {
     const normalized = query.trim().toLowerCase();
@@ -77,13 +68,8 @@ export default function Monitoreo() {
   const configCamera = cameras.find((cam) => cam.id === configId) ?? null;
 
   function handleRefresh() {
-    setCameras((prev) =>
-      prev.map((cam) => {
-        if (cam.status === "offline") return cam;
-        const nextLatency = Math.max(80, Math.min(220, cam.latencyMs + Math.floor(Math.random() * 30 - 15)));
-        return { ...cam, latencyMs: nextLatency };
-      }),
-    );
+    setIsLoading(true);
+    void loadCameras();
   }
 
   function handleTogglePlay(cameraId: string) {
@@ -102,7 +88,7 @@ export default function Monitoreo() {
               ...cam,
               ...patch,
               latencyMs: patch.status === "offline" ? 0 : Math.max(95, cam.latencyMs || 110),
-              lastSeen: patch.status === "offline" ? "Ahora" : cam.lastSeen,
+              lastSeen: patch.status === "offline" ? "Sin conexion" : "Activo",
             }
           : cam,
       ),
@@ -146,27 +132,43 @@ export default function Monitoreo() {
         </button>
       </div>
 
-      <section className="grid grid-cols-1 gap-4 md:grid-cols-2 xl:grid-cols-3">
-        {filtered.map((cam, index) => (
-          <div
-            key={cam.id}
-            className="relative overflow-hidden rounded-2xl"
-            style={{ animation: `monitoringReveal 340ms ease-out ${index * 80}ms both` }}
-          >
+      {error ? (
+        <div className="mb-4 rounded-xl border border-rose-400/30 bg-rose-500/10 px-4 py-3 text-sm text-rose-200">
+          {error}
+        </div>
+      ) : null}
+
+      {isLoading ? (
+        <div className="rounded-2xl border border-cyan-300/20 bg-slate-900/70 p-5 text-sm text-slate-300 backdrop-blur">
+          Cargando mosaico de monitoreo...
+        </div>
+      ) : filtered.length ? (
+        <section className="grid grid-cols-1 gap-4 md:grid-cols-2 xl:grid-cols-3">
+          {filtered.map((cam, index) => (
             <div
-              className="pointer-events-none absolute inset-y-0 -left-1/3 z-10 w-1/2 bg-gradient-to-r from-transparent via-cyan-300/15 to-transparent"
-              style={{ animation: "monitoringSweep 4.2s linear infinite" }}
-            />
-            <VideoTile
-              cam={cam}
-              isPlaying={Boolean(playing[cam.id])}
-              onTogglePlay={() => handleTogglePlay(cam.id)}
-              onOpenFullscreen={() => setFullscreenId(cam.id)}
-              onOpenConfig={() => setConfigId(cam.id)}
-            />
-          </div>
-        ))}
-      </section>
+              key={cam.id}
+              className="relative overflow-hidden rounded-2xl"
+              style={{ animation: `monitoringReveal 340ms ease-out ${index * 80}ms both` }}
+            >
+              <div
+                className="pointer-events-none absolute inset-y-0 -left-1/3 z-10 w-1/2 bg-gradient-to-r from-transparent via-cyan-300/15 to-transparent"
+                style={{ animation: "monitoringSweep 4.2s linear infinite" }}
+              />
+              <VideoTile
+                cam={cam}
+                isPlaying={Boolean(playing[cam.id])}
+                onTogglePlay={() => handleTogglePlay(cam.id)}
+                onOpenFullscreen={() => setFullscreenId(cam.id)}
+                onOpenConfig={() => setConfigId(cam.id)}
+              />
+            </div>
+          ))}
+        </section>
+      ) : (
+        <div className="rounded-2xl border border-cyan-300/20 bg-slate-900/70 p-5 text-sm text-slate-300 backdrop-blur">
+          No hay camaras que coincidan con la busqueda actual.
+        </div>
+      )}
 
       <CameraFullscreenModal
         camera={fullscreenCamera}
