@@ -19,6 +19,7 @@ import { serializeAudit, serializeUser } from "./serializers.js";
 import { createAlertFromMobile, listAlerts, updateAlertWorkflow } from "./repositories/alertsRepository.js";
 import { createCamera, listCameras, updateCamera } from "./repositories/camerasRepository.js";
 import { listRecordings } from "./repositories/recordingsRepository.js";
+import { listResidents } from "./repositories/residentsRepository.js";
 import { logEvent, LOG_FILE_PATH } from "./logger.js";
 
 dotenv.config();
@@ -262,6 +263,18 @@ app.get("/recordings", requireAuth, async (req, res, next) => {
     if (!communityId) return;
 
     const items = await listRecordings(communityId);
+    res.json({ items });
+  } catch (error) {
+    next(error);
+  }
+});
+
+app.get("/residents", requireAuth, async (req, res, next) => {
+  try {
+    const communityId = requireCommunityScope(req, res);
+    if (!communityId) return;
+
+    const items = await listResidents(communityId);
     res.json({ items });
   } catch (error) {
     next(error);

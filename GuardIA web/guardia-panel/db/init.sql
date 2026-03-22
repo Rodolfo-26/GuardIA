@@ -226,6 +226,20 @@ CREATE TABLE IF NOT EXISTS acciones_alerta (
   creado_en timestamptz NOT NULL DEFAULT now()
 );
 
+CREATE TABLE IF NOT EXISTS residentes (
+  id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+  comunidad_id uuid NOT NULL REFERENCES comunidades(id) ON DELETE CASCADE,
+  nombre_completo text NOT NULL,
+  correo text,
+  telefono text,
+  direccion_interna text NOT NULL,
+  referencia_acceso text,
+  estado text NOT NULL DEFAULT 'activo' CHECK (estado IN ('activo', 'inactivo', 'moroso', 'visitante')),
+  notas text,
+  creado_en timestamptz NOT NULL DEFAULT now(),
+  actualizado_en timestamptz NOT NULL DEFAULT now()
+);
+
 CREATE TABLE IF NOT EXISTS vinculos_evidencia (
   id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
   alerta_id uuid NOT NULL REFERENCES alertas(id) ON DELETE CASCADE,
@@ -269,6 +283,8 @@ CREATE INDEX IF NOT EXISTS idx_alertas_estado ON alertas(estado);
 CREATE INDEX IF NOT EXISTS idx_alertas_detectada_en ON alertas(detectada_en);
 CREATE INDEX IF NOT EXISTS idx_acciones_alerta_id ON acciones_alerta(alerta_id);
 CREATE INDEX IF NOT EXISTS idx_acciones_usuario_id ON acciones_alerta(usuario_id);
+CREATE INDEX IF NOT EXISTS idx_residentes_comunidad_id ON residentes(comunidad_id);
+CREATE INDEX IF NOT EXISTS idx_residentes_estado ON residentes(estado);
 CREATE INDEX IF NOT EXISTS idx_evidencia_alerta_id ON vinculos_evidencia(alerta_id);
 CREATE INDEX IF NOT EXISTS idx_evidencia_grabacion_id ON vinculos_evidencia(grabacion_id);
 CREATE INDEX IF NOT EXISTS idx_bitacora_actor ON bitacora_auditoria(actor_usuario_id);

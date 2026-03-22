@@ -7,6 +7,7 @@ import AppLayout from "./layout/AppLayout";
 import AlertasPage from "./pages/AlertasPage";
 import Dashboard from "./pages/Dashboard";
 import GrabacionesPage from "./pages/GrabacionesPage";
+import ResidentsPage from "./pages/ResidentsPage";
 import UsuariosPage from "./pages/UsuariosPage";
 import CamerasPage from "./pages/camaras/CamerasPage";
 import Login from "./pages/login/Login";
@@ -64,6 +65,7 @@ export default function App() {
           />
           <Route path="/alertas" element={<AlertasPage />} />
           <Route path="/grabaciones" element={<GrabacionesPage />} />
+          <Route path="/residentes" element={<ResidentsPage />} />
           <Route path="/usuarios" element={<UsuariosPage />} />
         </Route>
 

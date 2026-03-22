@@ -58,6 +58,23 @@ FROM (
 ) AS values_table
 ON CONFLICT (firebase_uid) DO NOTHING;
 
+WITH comunidad_demo AS (
+  SELECT id FROM comunidades WHERE nombre = 'Comunidad Demo' LIMIT 1
+)
+INSERT INTO residentes (comunidad_id, nombre_completo, correo, telefono, direccion_interna, referencia_acceso, estado, notas)
+SELECT comunidad_demo.id, values_table.nombre_completo, values_table.correo, values_table.telefono, values_table.direccion_interna, values_table.referencia_acceso, values_table.estado, values_table.notas
+FROM comunidad_demo
+JOIN (
+  VALUES
+    ('Maria Fernanda Soto', 'maria.soto@guardia.local', '222-301-4401', 'Casa 12, Calle Norte', 'Porton blanco con camara exterior', 'activo', 'Contacto principal de la vivienda.'),
+    ('Jose Luis Ramirez', 'jose.ramirez@guardia.local', '222-301-4402', 'Depto B-4, Torre Central', 'Acceso por lobby sur', 'activo', 'Solicita aviso previo para visitas nocturnas.'),
+    ('Ana Paula Cruz', 'ana.cruz@guardia.local', '222-301-4403', 'Casa 7, Privada del Lago', 'Frente al area comun', 'moroso', 'Acceso vehicular restringido hasta regularizar cuota.'),
+    ('Carlos Mendoza', NULL, '222-301-4404', 'Cuarto 3, Vecindad Oriente', 'Entrada peatonal lateral', 'visitante', 'Registro temporal de familiar autorizado.')
+) AS values_table(nombre_completo, correo, telefono, direccion_interna, referencia_acceso, estado, notas) ON true
+WHERE NOT EXISTS (
+  SELECT 1 FROM residentes WHERE comunidad_id = comunidad_demo.id
+);
+
 WITH actor AS (
   SELECT id FROM usuarios WHERE firebase_uid = 'firebase-admin-01' LIMIT 1
 ),

@@ -73,6 +73,7 @@ export default function Sidebar({
                 <NavItem label="Monitoreo" to="/monitoreo" />
                 <NavItem label="Alertas" to="/alertas" />
                 <NavItem label="Grabaciones" to="/grabaciones" />
+                <NavItem label="Residentes" to="/residentes" />
                 {isAdminOrSupervisor && <NavItem label="Camaras" to="/camaras" />}
                 <NavItem label={usersLabel} to="/usuarios" />
               </nav>
