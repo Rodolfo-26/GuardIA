@@ -1,4 +1,5 @@
 import { firebaseAdminAuth } from "./firebaseAdmin.js";
+import { getAccessScopeByFirebaseUid } from "./repositories/usersRepository.js";
 
 const requireAuthEnabled = String(process.env.API_REQUIRE_AUTH || "false").toLowerCase() === "true";
 
@@ -24,9 +25,13 @@ export async function attachAuthContext(req, _res, next) {
     }
 
     const decoded = await firebaseAdminAuth.verifyIdToken(token);
+    const scope = await getAccessScopeByFirebaseUid(decoded.uid);
     req.authContext = {
       uid: decoded.uid,
-      role: typeof decoded.appRole === "string" ? decoded.appRole : null,
+      role: typeof decoded.appRole === "string" ? decoded.appRole : scope?.rol ?? null,
+      dbUserId: scope?.id ?? null,
+      communityId: scope?.comunidad_id ?? null,
+      communityName: scope?.comunidad_nombre ?? null,
       claims: decoded,
     };
     next();

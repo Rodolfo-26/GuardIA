@@ -31,9 +31,11 @@ const alertsBaseQuery = `
   ) latest_action ON true
 `;
 
-export async function listAlerts() {
+export async function listAlerts(communityId) {
   const result = await query(
     `${alertsBaseQuery}
+     LEFT JOIN sedes s ON s.id = z.sede_id
+     WHERE COALESCE(a.comunidad_id, s.comunidad_id, u.comunidad_id) = $1
      ORDER BY
        CASE a.severidad
          WHEN 'critica' THEN 1
@@ -42,12 +44,13 @@ export async function listAlerts() {
          ELSE 4
        END,
        a.detectada_en DESC`,
+    [communityId],
   );
 
   return result.rows;
 }
 
-export async function updateAlertWorkflow({ alertId, assigneeUid, status, note }) {
+export async function updateAlertWorkflow({ alertId, assigneeUid, status, note, communityId }) {
   await query("BEGIN");
 
   try {
@@ -55,8 +58,8 @@ export async function updateAlertWorkflow({ alertId, assigneeUid, status, note }
 
     if (assigneeUid) {
       const userResult = await query(
-        `SELECT id FROM usuarios WHERE firebase_uid = $1 LIMIT 1`,
-        [assigneeUid],
+        `SELECT id FROM usuarios WHERE firebase_uid = $1 AND comunidad_id = $2 LIMIT 1`,
+        [assigneeUid, communityId],
       );
       assigneeDbId = userResult.rows[0]?.id ?? null;
     }
@@ -69,9 +72,10 @@ export async function updateAlertWorkflow({ alertId, assigneeUid, status, note }
           estado = $3::estado_alerta,
           resuelta_en = CASE WHEN $3::estado_alerta = 'resuelta' THEN now() ELSE NULL END
         WHERE id = $1
+          AND comunidad_id = $4
         RETURNING id
       `,
-      [alertId, assigneeDbId, status],
+      [alertId, assigneeDbId, status, communityId],
     );
 
     if (!updateResult.rows[0]) {
@@ -83,12 +87,12 @@ export async function updateAlertWorkflow({ alertId, assigneeUid, status, note }
         INSERT INTO acciones_alerta (alerta_id, usuario_id, tipo_accion, nota)
         VALUES (
           $1,
-          COALESCE($2, (SELECT id FROM usuarios ORDER BY creado_en ASC LIMIT 1)),
+          COALESCE($2, (SELECT id FROM usuarios WHERE comunidad_id = $5 ORDER BY creado_en ASC LIMIT 1)),
           $3,
           $4
         )
       `,
-      [alertId, assigneeDbId, status === "resuelta" ? "cerrar" : "registrar", note || "Actualizacion operativa"],
+      [alertId, assigneeDbId, status === "resuelta" ? "cerrar" : "registrar", note || "Actualizacion operativa", communityId],
     );
 
     await query("COMMIT");
@@ -98,14 +102,14 @@ export async function updateAlertWorkflow({ alertId, assigneeUid, status, note }
   }
 }
 
-export async function createAlertFromMobile({ title, type, severity, description, metadata }) {
+export async function createAlertFromMobile({ title, type, severity, description, metadata, communityId }) {
   const result = await query(
     `
-      INSERT INTO alertas (titulo, tipo_evento, severidad, descripcion, metadata)
-      VALUES ($1, $2, $3::severidad_alerta, $4, $5::jsonb)
+      INSERT INTO alertas (comunidad_id, titulo, tipo_evento, severidad, descripcion, metadata)
+      VALUES ($1, $2, $3, $4::severidad_alerta, $5, $6::jsonb)
       RETURNING id
     `,
-    [title, type, severity, description, metadata || {}]
+    [communityId, title, type, severity, description, metadata || {}]
   );
   return result.rows[0].id;
 }

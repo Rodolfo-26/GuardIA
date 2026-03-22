@@ -1,6 +1,6 @@
 import cors from "cors";
-import express from "express";
 import dotenv from "dotenv";
+import express from "express";
 import fs from "fs";
 import readline from "readline";
 import { attachAuthContext, requireAuth, requireRole } from "./authMiddleware.js";
@@ -16,7 +16,7 @@ import {
   updateUserStatusByFirebaseUid,
 } from "./repositories/usersRepository.js";
 import { serializeAudit, serializeUser } from "./serializers.js";
-import { listAlerts, updateAlertWorkflow, createAlertFromMobile } from "./repositories/alertsRepository.js";
+import { createAlertFromMobile, listAlerts, updateAlertWorkflow } from "./repositories/alertsRepository.js";
 import { createCamera, listCameras, updateCamera } from "./repositories/camerasRepository.js";
 import { listRecordings } from "./repositories/recordingsRepository.js";
 import { logEvent, LOG_FILE_PATH } from "./logger.js";
@@ -46,18 +46,30 @@ const corsOptions = {
   },
 };
 
+function requireCommunityScope(req, res) {
+  const communityId = req.authContext?.communityId;
+  if (!communityId) {
+    res.status(403).json({ message: "El usuario no tiene una comunidad asignada." });
+    return null;
+  }
+
+  return communityId;
+}
+
 app.use(cors(corsOptions));
 app.use(express.json());
 app.use(attachAuthContext);
 
-// ─── HTTP Request Logger Middleware ───
 app.use((req, res, next) => {
   const start = Date.now();
   res.on("finish", () => {
     const duration = Date.now() - start;
-    logEvent("info", "HTTP_REQUEST", `${req.method} ${req.path}`,
+    logEvent(
+      "info",
+      "HTTP_REQUEST",
+      `${req.method} ${req.path}`,
       `${req.method} ${req.originalUrl} ${res.statusCode} ${duration}ms`,
-      { method: req.method, path: req.originalUrl, statusCode: res.statusCode, durationMs: duration, ip: req.ip }
+      { method: req.method, path: req.originalUrl, statusCode: res.statusCode, durationMs: duration, ip: req.ip },
     );
   });
   next();
@@ -72,9 +84,12 @@ app.get("/health", async (_req, res, next) => {
   }
 });
 
-app.get("/users", requireAuth, async (_req, res, next) => {
+app.get("/users", requireAuth, async (req, res, next) => {
   try {
-    const rows = await listUsers();
+    const communityId = requireCommunityScope(req, res);
+    if (!communityId) return;
+
+    const rows = await listUsers(communityId);
     res.json({ items: rows.map(serializeUser), total: rows.length });
   } catch (error) {
     next(error);
@@ -83,7 +98,10 @@ app.get("/users", requireAuth, async (_req, res, next) => {
 
 app.get("/users/:id", requireAuth, async (req, res, next) => {
   try {
-    const user = await getUserById(req.params.id);
+    const communityId = requireCommunityScope(req, res);
+    if (!communityId) return;
+
+    const user = await getUserById(req.params.id, communityId);
 
     if (!user) {
       res.status(404).json({ message: "Usuario no encontrado." });
@@ -98,17 +116,23 @@ app.get("/users/:id", requireAuth, async (req, res, next) => {
 
 app.get("/audit/users", requireAuth, async (req, res, next) => {
   try {
+    const communityId = requireCommunityScope(req, res);
+    if (!communityId) return;
+
     const limitValue = Math.min(Math.max(Number(req.query.limit || 5), 1), 50);
-    const rows = await listRecentUserAudit(limitValue);
+    const rows = await listRecentUserAudit(limitValue, communityId);
     res.json({ items: rows.map(serializeAudit), total: rows.length });
   } catch (error) {
     next(error);
   }
 });
 
-app.get("/alerts", requireAuth, async (_req, res, next) => {
+app.get("/alerts", requireAuth, async (req, res, next) => {
   try {
-    const items = await listAlerts();
+    const communityId = requireCommunityScope(req, res);
+    if (!communityId) return;
+
+    const items = await listAlerts(communityId);
     res.json({ items });
   } catch (error) {
     next(error);
@@ -117,6 +141,9 @@ app.get("/alerts", requireAuth, async (_req, res, next) => {
 
 app.patch("/alerts/:id/workflow", requireAuth, requireRole(["Admin", "Supervisor", "Operador"]), async (req, res, next) => {
   try {
+    const communityId = requireCommunityScope(req, res);
+    if (!communityId) return;
+
     const { assigneeUid, status, note } = req.body ?? {};
 
     if (!["nueva", "en_proceso", "resuelta"].includes(status)) {
@@ -126,14 +153,18 @@ app.patch("/alerts/:id/workflow", requireAuth, requireRole(["Admin", "Supervisor
 
     await updateAlertWorkflow({
       alertId: req.params.id,
+      communityId,
       assigneeUid: assigneeUid || null,
       status,
       note: note || "",
     });
 
-    logEvent("info", "CRUD_ALERTS", "update_alert_workflow",
+    logEvent(
+      "info",
+      "CRUD_ALERTS",
+      "update_alert_workflow",
       `Alerta ${req.params.id} actualizada a estado '${status}'`,
-      { alertId: req.params.id, status, assigneeUid: assigneeUid || null, note: note || "" }
+      { alertId: req.params.id, status, assigneeUid: assigneeUid || null, note: note || "", communityId },
     );
 
     res.json({ ok: true });
@@ -149,6 +180,9 @@ app.patch("/alerts/:id/workflow", requireAuth, requireRole(["Admin", "Supervisor
 
 app.post("/reports", requireAuth, async (req, res, next) => {
   try {
+    const communityId = requireCommunityScope(req, res);
+    if (!communityId) return;
+
     const { type, urgency, description, location, notifyZoneOnly } = req.body ?? {};
 
     let severity = "media";
@@ -156,23 +190,26 @@ app.post("/reports", requireAuth, async (req, res, next) => {
     if (urgency === "Alta") severity = "alta";
 
     const alertId = await createAlertFromMobile({
-      title: "Reporte: " + (type || "Otro"),
+      communityId,
+      title: `Reporte: ${type || "Otro"}`,
       type: type || "reporte_usuario",
       severity,
-      description: description || "Sin descripción proporcionada",
-      metadata: { location, notifyZoneOnly, source: "mobile_app_report", folio: `GIA-${Date.now().toString().slice(-6)}` }
+      description: description || "Sin descripcion proporcionada",
+      metadata: { location, notifyZoneOnly, source: "mobile_app_report", folio: `GIA-${Date.now().toString().slice(-6)}` },
     });
 
-    logEvent("info", "CRUD_ALERTS", "create_report",
-      `Reporte creado con id ${alertId}`,
-      { alertId, type, severity }
-    );
+    logEvent("info", "CRUD_ALERTS", "create_report", `Reporte creado con id ${alertId}`, {
+      alertId,
+      type,
+      severity,
+      communityId,
+    });
 
     res.status(201).json({
       id: alertId,
       folio: `GIA-2026-${Date.now().toString().slice(-4)}`,
       status: "sent",
-      message: "Reporte enviado exitosamente"
+      message: "Reporte enviado exitosamente",
     });
   } catch (error) {
     next(error);
@@ -181,40 +218,50 @@ app.post("/reports", requireAuth, async (req, res, next) => {
 
 app.post("/panic", requireAuth, async (req, res, next) => {
   try {
+    const communityId = requireCommunityScope(req, res);
+    if (!communityId) return;
+
     const alertId = await createAlertFromMobile({
-      title: "Botón de Pánico",
+      communityId,
+      title: "Boton de Panico",
       type: "panico",
       severity: "critica",
-      description: "El usuario ha activado el botón de pánico desde la aplicación móvil.",
-      metadata: { source: "mobile_app_panic", user_firebase_uid: req.user?.uid || "desconocido" }
+      description: "El usuario ha activado el boton de panico desde la aplicacion movil.",
+      metadata: { source: "mobile_app_panic", user_firebase_uid: req.authContext?.uid || "desconocido" },
     });
 
-    logEvent("info", "CRUD_ALERTS", "create_panic",
-      `Botón de pánico activado con id ${alertId}`,
-      { alertId }
-    );
+    logEvent("info", "CRUD_ALERTS", "create_panic", `Boton de panico activado con id ${alertId}`, {
+      alertId,
+      communityId,
+    });
 
     res.status(201).json({
-      message: "Alerta de pánico enviada",
-      incidentId: alertId
+      message: "Alerta de panico enviada",
+      incidentId: alertId,
     });
   } catch (error) {
     next(error);
   }
 });
 
-app.get("/cameras", requireAuth, async (_req, res, next) => {
+app.get("/cameras", requireAuth, async (req, res, next) => {
   try {
-    const items = await listCameras();
+    const communityId = requireCommunityScope(req, res);
+    if (!communityId) return;
+
+    const items = await listCameras(communityId);
     res.json({ items });
   } catch (error) {
     next(error);
   }
 });
 
-app.get("/recordings", requireAuth, async (_req, res, next) => {
+app.get("/recordings", requireAuth, async (req, res, next) => {
   try {
-    const items = await listRecordings();
+    const communityId = requireCommunityScope(req, res);
+    if (!communityId) return;
+
+    const items = await listRecordings(communityId);
     res.json({ items });
   } catch (error) {
     next(error);
@@ -223,12 +270,17 @@ app.get("/recordings", requireAuth, async (_req, res, next) => {
 
 app.post("/cameras", requireAuth, requireRole(["Admin", "Supervisor"]), async (req, res, next) => {
   try {
-    const createdId = await createCamera(req.body ?? {});
+    const communityId = requireCommunityScope(req, res);
+    if (!communityId) return;
 
-    logEvent("info", "CRUD_CAMERAS", "create_camera",
-      `Camara '${req.body?.name || "Sin nombre"}' creada con id ${createdId}`,
-      { cameraId: createdId, name: req.body?.name, zone: req.body?.zone }
-    );
+    const createdId = await createCamera(req.body ?? {}, communityId);
+
+    logEvent("info", "CRUD_CAMERAS", "create_camera", `Camara '${req.body?.name || "Sin nombre"}' creada con id ${createdId}`, {
+      cameraId: createdId,
+      name: req.body?.name,
+      zone: req.body?.zone,
+      communityId,
+    });
 
     res.status(201).json({ ok: true, id: createdId });
   } catch (error) {
@@ -238,16 +290,20 @@ app.post("/cameras", requireAuth, requireRole(["Admin", "Supervisor"]), async (r
 
 app.patch("/cameras/:id", requireAuth, requireRole(["Admin", "Supervisor"]), async (req, res, next) => {
   try {
-    const updated = await updateCamera(req.params.id, req.body ?? {});
+    const communityId = requireCommunityScope(req, res);
+    if (!communityId) return;
+
+    const updated = await updateCamera(req.params.id, req.body ?? {}, communityId);
     if (!updated) {
       res.status(404).json({ message: "Camara no encontrada." });
       return;
     }
 
-    logEvent("info", "CRUD_CAMERAS", "update_camera",
-      `Camara ${req.params.id} actualizada`,
-      { cameraId: req.params.id, changes: req.body }
-    );
+    logEvent("info", "CRUD_CAMERAS", "update_camera", `Camara ${req.params.id} actualizada`, {
+      cameraId: req.params.id,
+      changes: req.body,
+      communityId,
+    });
 
     res.json({ ok: true });
   } catch (error) {
@@ -257,14 +313,10 @@ app.patch("/cameras/:id", requireAuth, requireRole(["Admin", "Supervisor"]), asy
 
 app.post("/users", requireAuth, requireRole(["Admin"]), async (req, res, next) => {
   try {
-    const {
-      firebaseUid,
-      fullName,
-      email,
-      role,
-      status,
-      site,
-    } = req.body ?? {};
+    const communityId = requireCommunityScope(req, res);
+    if (!communityId) return;
+
+    const { firebaseUid, fullName, email, role, status, site } = req.body ?? {};
 
     if (!firebaseUid || !fullName || !email || !role || !status || !site) {
       res.status(400).json({ message: "Faltan campos obligatorios." });
@@ -283,6 +335,7 @@ app.post("/users", requireAuth, requireRole(["Admin"]), async (req, res, next) =
 
     const created = await createUserProfile({
       firebaseUid,
+      communityId,
       fullName,
       email,
       role,
@@ -298,13 +351,17 @@ app.post("/users", requireAuth, requireRole(["Admin"]), async (req, res, next) =
     await createAuditEntry({
       targetFirebaseUid: firebaseUid,
       action: "create_user",
-      changes: { email, role, status, site },
+      changes: { email, role, status, site, communityId },
     });
 
-    logEvent("info", "CRUD_USERS", "create_user",
-      `Usuario '${fullName}' (${email}) creado con rol '${role}'`,
-      { firebaseUid, email, role, status, site }
-    );
+    logEvent("info", "CRUD_USERS", "create_user", `Usuario '${fullName}' (${email}) creado con rol '${role}'`, {
+      firebaseUid,
+      email,
+      role,
+      status,
+      site,
+      communityId,
+    });
 
     res.status(201).json({ ok: true, firebaseUid });
   } catch (error) {
@@ -314,6 +371,9 @@ app.post("/users", requireAuth, requireRole(["Admin"]), async (req, res, next) =
 
 app.patch("/users/:id/role", requireAuth, requireRole(["Admin"]), async (req, res, next) => {
   try {
+    const communityId = requireCommunityScope(req, res);
+    if (!communityId) return;
+
     const { role } = req.body ?? {};
 
     if (!["admin", "supervisor", "operador"].includes(role)) {
@@ -321,7 +381,7 @@ app.patch("/users/:id/role", requireAuth, requireRole(["Admin"]), async (req, re
       return;
     }
 
-    const updated = await updateUserRoleByFirebaseUid(req.params.id, role);
+    const updated = await updateUserRoleByFirebaseUid(req.params.id, role, communityId);
 
     if (!updated) {
       res.status(404).json({ message: "Usuario no encontrado." });
@@ -331,13 +391,14 @@ app.patch("/users/:id/role", requireAuth, requireRole(["Admin"]), async (req, re
     await createAuditEntry({
       targetFirebaseUid: req.params.id,
       action: "update_role",
-      changes: { role },
+      changes: { role, communityId },
     });
 
-    logEvent("info", "CRUD_USERS", "update_role",
-      `Rol de usuario ${req.params.id} actualizado a '${role}'`,
-      { firebaseUid: req.params.id, newRole: role }
-    );
+    logEvent("info", "CRUD_USERS", "update_role", `Rol de usuario ${req.params.id} actualizado a '${role}'`, {
+      firebaseUid: req.params.id,
+      newRole: role,
+      communityId,
+    });
 
     res.json({ ok: true });
   } catch (error) {
@@ -347,6 +408,9 @@ app.patch("/users/:id/role", requireAuth, requireRole(["Admin"]), async (req, re
 
 app.patch("/users/:id/status", requireAuth, requireRole(["Admin", "Supervisor"]), async (req, res, next) => {
   try {
+    const communityId = requireCommunityScope(req, res);
+    if (!communityId) return;
+
     const { status } = req.body ?? {};
 
     if (!["activo", "inactivo", "bloqueado"].includes(status)) {
@@ -354,7 +418,7 @@ app.patch("/users/:id/status", requireAuth, requireRole(["Admin", "Supervisor"])
       return;
     }
 
-    const updated = await updateUserStatusByFirebaseUid(req.params.id, status);
+    const updated = await updateUserStatusByFirebaseUid(req.params.id, status, communityId);
 
     if (!updated) {
       res.status(404).json({ message: "Usuario no encontrado." });
@@ -364,13 +428,14 @@ app.patch("/users/:id/status", requireAuth, requireRole(["Admin", "Supervisor"])
     await createAuditEntry({
       targetFirebaseUid: req.params.id,
       action: "update_status",
-      changes: { status },
+      changes: { status, communityId },
     });
 
-    logEvent("info", "CRUD_USERS", "update_status",
-      `Estado de usuario ${req.params.id} actualizado a '${status}'`,
-      { firebaseUid: req.params.id, newStatus: status }
-    );
+    logEvent("info", "CRUD_USERS", "update_status", `Estado de usuario ${req.params.id} actualizado a '${status}'`, {
+      firebaseUid: req.params.id,
+      newStatus: status,
+      communityId,
+    });
 
     res.json({ ok: true });
   } catch (error) {
@@ -380,18 +445,21 @@ app.patch("/users/:id/status", requireAuth, requireRole(["Admin", "Supervisor"])
 
 app.post("/users/:id/close-sessions", requireAuth, requireRole(["Admin", "Supervisor"]), async (req, res, next) => {
   try {
-    await revokeUserSessionsByFirebaseUid(req.params.id);
+    const communityId = requireCommunityScope(req, res);
+    if (!communityId) return;
+
+    await revokeUserSessionsByFirebaseUid(req.params.id, communityId);
 
     await createAuditEntry({
       targetFirebaseUid: req.params.id,
       action: "close_sessions",
-      changes: { source: "panel" },
+      changes: { source: "panel", communityId },
     });
 
-    logEvent("info", "CRUD_USERS", "close_sessions",
-      `Sesiones del usuario ${req.params.id} cerradas desde el panel`,
-      { firebaseUid: req.params.id }
-    );
+    logEvent("info", "CRUD_USERS", "close_sessions", `Sesiones del usuario ${req.params.id} cerradas desde el panel`, {
+      firebaseUid: req.params.id,
+      communityId,
+    });
 
     res.json({ ok: true });
   } catch (error) {
@@ -399,7 +467,6 @@ app.post("/users/:id/close-sessions", requireAuth, requireRole(["Admin", "Superv
   }
 });
 
-// ─── Endpoint: Registrar evento de login/logout desde el frontend ───
 app.post("/audit/login", requireAuth, async (req, res, next) => {
   try {
     const { action, email } = req.body ?? {};
@@ -409,7 +476,10 @@ app.post("/audit/login", requireAuth, async (req, res, next) => {
       return;
     }
 
-    logEvent("info", "AUTH", action,
+    logEvent(
+      "info",
+      "AUTH",
+      action,
       action === "login"
         ? `Usuario ${email || "desconocido"} inicio sesion`
         : action === "logout"
@@ -417,7 +487,7 @@ app.post("/audit/login", requireAuth, async (req, res, next) => {
           : action === "mfa_verified"
             ? `Usuario ${email || "desconocido"} verifico MFA`
             : `Intento de login fallido para ${email || "desconocido"}`,
-      { email: email || "desconocido", action, ip: req.ip }
+      { email: email || "desconocido", action, ip: req.ip, communityId: req.authContext?.communityId ?? null },
     );
 
     res.json({ ok: true });
@@ -426,7 +496,6 @@ app.post("/audit/login", requireAuth, async (req, res, next) => {
   }
 });
 
-// ─── Endpoint: Leer logs del archivo (paginado) ───
 app.get("/audit/logs", requireAuth, async (req, res, next) => {
   try {
     const limit = Math.min(Math.max(Number(req.query.limit || 50), 1), 200);
@@ -448,7 +517,7 @@ app.get("/audit/logs", requireAuth, async (req, res, next) => {
         if (category && parsed.category !== category) continue;
         allLines.push(parsed);
       } catch {
-        // Linea no valida, ignorar
+        // Ignora lineas no validas.
       }
     }
 
@@ -460,10 +529,9 @@ app.get("/audit/logs", requireAuth, async (req, res, next) => {
 });
 
 app.use((error, _req, res, _next) => {
-  logEvent("error", "SYSTEM", "unhandled_error",
-    `Error interno: ${error.message || "Error desconocido"}`,
-    { stack: error.stack }
-  );
+  logEvent("error", "SYSTEM", "unhandled_error", `Error interno: ${error.message || "Error desconocido"}`, {
+    stack: error.stack,
+  });
 
   console.error("[guardia-api]", error);
   res.status(500).json({
@@ -472,19 +540,14 @@ app.use((error, _req, res, _next) => {
 });
 
 const server = app.listen(port, () => {
-  logEvent("info", "SYSTEM", "server_start",
-    `GuardIA API escuchando en http://localhost:${port}`,
-    { port, logFile: LOG_FILE_PATH }
-  );
+  logEvent("info", "SYSTEM", "server_start", `GuardIA API escuchando en http://localhost:${port}`, {
+    port,
+    logFile: LOG_FILE_PATH,
+  });
   console.log(`GuardIA API escuchando en http://localhost:${port}`);
 });
 
 async function shutdown(signal) {
-  logEvent("info", "SYSTEM", "server_shutdown",
-    `Cerrando servidor por ${signal}`,
-    { signal }
-  );
-
   console.log(`Cerrando servidor por ${signal}...`);
   server.close(async () => {
     await pool.end();

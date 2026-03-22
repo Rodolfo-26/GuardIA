@@ -5,6 +5,10 @@ CREATE EXTENSION IF NOT EXISTS "pgcrypto";
 
 DO $$
 BEGIN
+  IF NOT EXISTS (SELECT 1 FROM pg_type WHERE typname = 'tipo_comunidad') THEN
+    CREATE TYPE tipo_comunidad AS ENUM ('residencial', 'vecindad', 'manzana', 'privada', 'colonia', 'general');
+  END IF;
+
   IF NOT EXISTS (SELECT 1 FROM pg_type WHERE typname = 'rol_usuario') THEN
     CREATE TYPE rol_usuario AS ENUM ('admin', 'supervisor', 'operador');
   END IF;
@@ -37,9 +41,21 @@ CREATE TABLE IF NOT EXISTS roles (
   creado_en timestamptz NOT NULL DEFAULT now()
 );
 
+CREATE TABLE IF NOT EXISTS comunidades (
+  id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+  nombre text NOT NULL UNIQUE,
+  tipo tipo_comunidad NOT NULL DEFAULT 'general',
+  direccion text,
+  estado text NOT NULL DEFAULT 'activa',
+  metadata jsonb NOT NULL DEFAULT '{}'::jsonb,
+  creado_en timestamptz NOT NULL DEFAULT now(),
+  actualizado_en timestamptz NOT NULL DEFAULT now()
+);
+
 CREATE TABLE IF NOT EXISTS usuarios (
   id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
   firebase_uid text NOT NULL UNIQUE,
+  comunidad_id uuid REFERENCES comunidades(id) ON DELETE RESTRICT,
   rol_id uuid NOT NULL REFERENCES roles(id),
   nombre_completo text NOT NULL,
   correo text NOT NULL UNIQUE,
@@ -79,11 +95,31 @@ CREATE TABLE IF NOT EXISTS desafios_mfa (
 
 CREATE TABLE IF NOT EXISTS sedes (
   id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+  comunidad_id uuid REFERENCES comunidades(id) ON DELETE CASCADE,
   nombre text NOT NULL,
   direccion text,
   zona_horaria text NOT NULL DEFAULT 'America/Mexico_City',
   creado_en timestamptz NOT NULL DEFAULT now()
 );
+
+ALTER TABLE usuarios ADD COLUMN IF NOT EXISTS comunidad_id uuid REFERENCES comunidades(id) ON DELETE RESTRICT;
+ALTER TABLE sedes ADD COLUMN IF NOT EXISTS comunidad_id uuid REFERENCES comunidades(id) ON DELETE CASCADE;
+
+INSERT INTO comunidades (nombre, tipo, direccion, estado)
+VALUES ('Comunidad Base', 'general', 'Configuracion inicial del sistema', 'activa')
+ON CONFLICT (nombre) DO NOTHING;
+
+UPDATE usuarios
+SET comunidad_id = (
+  SELECT id FROM comunidades ORDER BY creado_en ASC LIMIT 1
+)
+WHERE comunidad_id IS NULL;
+
+UPDATE sedes
+SET comunidad_id = (
+  SELECT id FROM comunidades ORDER BY creado_en ASC LIMIT 1
+)
+WHERE comunidad_id IS NULL;
 
 CREATE TABLE IF NOT EXISTS zonas (
   id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
@@ -141,6 +177,7 @@ CREATE TABLE IF NOT EXISTS grabaciones (
 
 CREATE TABLE IF NOT EXISTS alertas (
   id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+  comunidad_id uuid REFERENCES comunidades(id) ON DELETE CASCADE,
   camara_id uuid REFERENCES camaras(id) ON DELETE CASCADE,
   usuario_asignado_id uuid REFERENCES usuarios(id) ON DELETE SET NULL,
   titulo text NOT NULL,
@@ -155,6 +192,30 @@ CREATE TABLE IF NOT EXISTS alertas (
   metadata jsonb DEFAULT '{}'::jsonb,
   CHECK (resuelta_en IS NULL OR resuelta_en >= detectada_en)
 );
+
+ALTER TABLE alertas ADD COLUMN IF NOT EXISTS comunidad_id uuid REFERENCES comunidades(id) ON DELETE CASCADE;
+
+UPDATE alertas a
+SET comunidad_id = COALESCE(
+  (
+    SELECT s.comunidad_id
+    FROM camaras c
+    JOIN zonas z ON z.id = c.zona_id
+    JOIN sedes s ON s.id = z.sede_id
+    WHERE c.id = a.camara_id
+    LIMIT 1
+  ),
+  (
+    SELECT u.comunidad_id
+    FROM usuarios u
+    WHERE u.id = a.usuario_asignado_id
+    LIMIT 1
+  ),
+  (
+    SELECT id FROM comunidades ORDER BY creado_en ASC LIMIT 1
+  )
+)
+WHERE a.comunidad_id IS NULL;
 
 CREATE TABLE IF NOT EXISTS acciones_alerta (
   id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
@@ -187,18 +248,21 @@ CREATE TABLE IF NOT EXISTS bitacora_auditoria (
 );
 
 CREATE INDEX IF NOT EXISTS idx_usuarios_firebase_uid ON usuarios(firebase_uid);
+CREATE INDEX IF NOT EXISTS idx_usuarios_comunidad_id ON usuarios(comunidad_id);
 CREATE INDEX IF NOT EXISTS idx_usuarios_rol_id ON usuarios(rol_id);
 CREATE INDEX IF NOT EXISTS idx_usuarios_estado ON usuarios(estado);
 CREATE INDEX IF NOT EXISTS idx_sesiones_usuario_id ON sesiones_usuario(usuario_id);
 CREATE INDEX IF NOT EXISTS idx_sesiones_expira_en ON sesiones_usuario(expira_en);
 CREATE INDEX IF NOT EXISTS idx_desafios_mfa_usuario_id ON desafios_mfa(usuario_id);
 CREATE INDEX IF NOT EXISTS idx_desafios_mfa_expira_en ON desafios_mfa(expira_en);
+CREATE INDEX IF NOT EXISTS idx_sedes_comunidad_id ON sedes(comunidad_id);
 CREATE INDEX IF NOT EXISTS idx_zonas_sede_id ON zonas(sede_id);
 CREATE INDEX IF NOT EXISTS idx_camaras_zona_id ON camaras(zona_id);
 CREATE INDEX IF NOT EXISTS idx_camaras_estado ON camaras(estado);
 CREATE INDEX IF NOT EXISTS idx_historial_camara_id ON historial_estado_camara(camara_id);
 CREATE INDEX IF NOT EXISTS idx_grabaciones_camara_id ON grabaciones(camara_id);
 CREATE INDEX IF NOT EXISTS idx_grabaciones_inicio_en ON grabaciones(inicio_en);
+CREATE INDEX IF NOT EXISTS idx_alertas_comunidad_id ON alertas(comunidad_id);
 CREATE INDEX IF NOT EXISTS idx_alertas_camara_id ON alertas(camara_id);
 CREATE INDEX IF NOT EXISTS idx_alertas_asignado_id ON alertas(usuario_asignado_id);
 CREATE INDEX IF NOT EXISTS idx_alertas_estado ON alertas(estado);

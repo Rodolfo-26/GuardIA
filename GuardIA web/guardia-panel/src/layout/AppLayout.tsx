@@ -28,10 +28,6 @@ const PAGE_META: Record<string, { title: string; subtitle: string }> = {
     title: "Usuarios",
     subtitle: "Gestion de cuentas, roles y control de sesiones",
   },
-  "/logs": {
-    title: "Logs en Vivo",
-    subtitle: "Bitacora de eventos y operaciones del sistema en tiempo real",
-  },
 };
 
 export default function AppLayout() {

@@ -1,6 +1,16 @@
-INSERT INTO sedes (nombre, direccion)
-VALUES ('Sede Principal', 'Parque industrial norte')
-ON CONFLICT DO NOTHING;
+INSERT INTO comunidades (nombre, tipo, direccion, estado)
+VALUES ('Comunidad Demo', 'residencial', 'Parque industrial norte', 'activa')
+ON CONFLICT (nombre) DO NOTHING;
+
+WITH comunidad_demo AS (
+  SELECT id FROM comunidades WHERE nombre = 'Comunidad Demo' LIMIT 1
+)
+INSERT INTO sedes (comunidad_id, nombre, direccion)
+SELECT comunidad_demo.id, 'Sede Principal', 'Parque industrial norte'
+FROM comunidad_demo
+WHERE NOT EXISTS (
+  SELECT 1 FROM sedes WHERE nombre = 'Sede Principal'
+);
 
 WITH sede_principal AS (
   SELECT id FROM sedes WHERE nombre = 'Sede Principal' LIMIT 1
@@ -24,9 +34,13 @@ role_supervisor AS (
 ),
 role_operador AS (
   SELECT id FROM roles WHERE nombre = 'operador' LIMIT 1
+),
+comunidad_demo AS (
+  SELECT id FROM comunidades WHERE nombre = 'Comunidad Demo' LIMIT 1
 )
-INSERT INTO usuarios (firebase_uid, rol_id, nombre_completo, correo, estado, sede_zona, ultimo_login_en)
+INSERT INTO usuarios (firebase_uid, comunidad_id, rol_id, nombre_completo, correo, estado, sede_zona, ultimo_login_en)
 SELECT values_table.firebase_uid,
+       values_table.comunidad_id,
        values_table.rol_id,
        values_table.nombre_completo,
        values_table.correo,
@@ -34,13 +48,13 @@ SELECT values_table.firebase_uid,
        values_table.sede_zona,
        now() - values_table.offset_login
 FROM (
-  SELECT 'firebase-admin-01' AS firebase_uid, (SELECT id FROM role_admin) AS rol_id, 'Rodolfo Estrada' AS nombre_completo, 'estradarodolfo81@gmail.com' AS correo, 'activo' AS estado, 'Sede Principal' AS sede_zona, interval '15 minutes' AS offset_login
+  SELECT 'firebase-admin-01' AS firebase_uid, (SELECT id FROM comunidad_demo) AS comunidad_id, (SELECT id FROM role_admin) AS rol_id, 'Rodolfo Estrada' AS nombre_completo, 'estradarodolfo81@gmail.com' AS correo, 'activo' AS estado, 'Sede Principal' AS sede_zona, interval '15 minutes' AS offset_login
   UNION ALL
-  SELECT 'firebase-supervisor-01', (SELECT id FROM role_supervisor), 'Eduardo Ramos', 'eduardo@guardia.local', 'activo', 'Sede Principal', interval '35 minutes'
+  SELECT 'firebase-supervisor-01', (SELECT id FROM comunidad_demo), (SELECT id FROM role_supervisor), 'Eduardo Ramos', 'eduardo@guardia.local', 'activo', 'Sede Principal', interval '35 minutes'
   UNION ALL
-  SELECT 'firebase-operador-01', (SELECT id FROM role_operador), 'Giovanni Perez', 'giovanni@guardia.local', 'activo', 'Sede Principal', interval '55 minutes'
+  SELECT 'firebase-operador-01', (SELECT id FROM comunidad_demo), (SELECT id FROM role_operador), 'Giovanni Perez', 'giovanni@guardia.local', 'activo', 'Sede Principal', interval '55 minutes'
   UNION ALL
-  SELECT 'firebase-operador-02', (SELECT id FROM role_operador), 'Luz Carla', 'luzcarla@guardia.local', 'inactivo', 'Sede Principal', interval '1 day'
+  SELECT 'firebase-operador-02', (SELECT id FROM comunidad_demo), (SELECT id FROM role_operador), 'Luz Carla', 'luzcarla@guardia.local', 'inactivo', 'Sede Principal', interval '1 day'
 ) AS values_table
 ON CONFLICT (firebase_uid) DO NOTHING;
 

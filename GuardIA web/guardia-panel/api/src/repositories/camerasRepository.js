@@ -16,17 +16,46 @@ const camerasBaseQuery = `
   JOIN zonas z ON z.id = c.zona_id
 `;
 
-export async function listCameras() {
-  const result = await query(`${camerasBaseQuery} ORDER BY c.nombre ASC`);
+export async function listCameras(communityId) {
+  const result = await query(
+    `${camerasBaseQuery}
+     JOIN sedes s ON s.id = z.sede_id
+     WHERE s.comunidad_id = $1
+     ORDER BY c.nombre ASC`,
+    [communityId],
+  );
   return result.rows;
 }
 
-async function ensureZone(zoneName) {
-  const existing = await query(`SELECT id FROM zonas WHERE nombre = $1 LIMIT 1`, [zoneName]);
+async function ensureZone(zoneName, communityId) {
+  const existing = await query(
+    `
+      SELECT z.id
+      FROM zonas z
+      JOIN sedes s ON s.id = z.sede_id
+      WHERE z.nombre = $1
+        AND s.comunidad_id = $2
+      LIMIT 1
+    `,
+    [zoneName, communityId],
+  );
   if (existing.rows[0]?.id) return existing.rows[0].id;
 
-  const sede = await query(`SELECT id FROM sedes ORDER BY creado_en ASC LIMIT 1`);
-  const sedeId = sede.rows[0]?.id;
+  const sede = await query(`SELECT id FROM sedes WHERE comunidad_id = $1 ORDER BY creado_en ASC LIMIT 1`, [communityId]);
+  let sedeId = sede.rows[0]?.id;
+
+  if (!sedeId && communityId) {
+    const createdSede = await query(
+      `
+        INSERT INTO sedes (comunidad_id, nombre, direccion)
+        VALUES ($1, 'Sede Base', 'Generada automaticamente')
+        RETURNING id
+      `,
+      [communityId],
+    );
+    sedeId = createdSede.rows[0]?.id;
+  }
+
   if (!sedeId) {
     throw new Error("NO_SEDE");
   }
@@ -43,8 +72,8 @@ async function ensureZone(zoneName) {
   return created.rows[0].id;
 }
 
-export async function createCamera(input) {
-  const zoneId = await ensureZone(input.zone);
+export async function createCamera(input, communityId) {
+  const zoneId = await ensureZone(input.zone, communityId);
   const codeResult = await query(`SELECT COUNT(*)::int AS total FROM camaras`);
   const nextNumber = String((codeResult.rows[0]?.total ?? 0) + 1).padStart(3, "0");
   const codigo = `CAM-${nextNumber}`;
@@ -83,8 +112,8 @@ export async function createCamera(input) {
   return result.rows[0]?.id ?? null;
 }
 
-export async function updateCamera(cameraId, input) {
-  const zoneId = await ensureZone(input.zone);
+export async function updateCamera(cameraId, input, communityId) {
+  const zoneId = await ensureZone(input.zone, communityId);
 
   const result = await query(
     `
@@ -100,6 +129,13 @@ export async function updateCamera(cameraId, input) {
         estado = 'online',
         actualizado_en = now()
       WHERE id = $1
+        AND EXISTS (
+          SELECT 1
+          FROM zonas z
+          JOIN sedes s ON s.id = z.sede_id
+          WHERE z.id = camaras.zona_id
+            AND s.comunidad_id = $9
+        )
       RETURNING id
     `,
     [
@@ -111,6 +147,7 @@ export async function updateCamera(cameraId, input) {
       input.streamUrl,
       JSON.stringify(input.aiProfiles),
       input.retentionDays,
+      communityId,
     ],
   );
 

@@ -4,6 +4,8 @@ const usersBaseQuery = `
   SELECT
     u.id,
     u.firebase_uid,
+    u.comunidad_id,
+    c.nombre AS comunidad_nombre,
     u.nombre_completo,
     u.correo,
     r.nombre AS rol,
@@ -16,32 +18,36 @@ const usersBaseQuery = `
     COUNT(DISTINCT aa.id) AS alertas_atendidas
   FROM usuarios u
   JOIN roles r ON r.id = u.rol_id
+  LEFT JOIN comunidades c ON c.id = u.comunidad_id
   LEFT JOIN sesiones_usuario su ON su.usuario_id = u.id
   LEFT JOIN acciones_alerta aa ON aa.usuario_id = u.id
 `;
 
-export async function listUsers() {
+export async function listUsers(communityId) {
   const result = await query(
     `${usersBaseQuery}
+     WHERE u.comunidad_id = $1
      GROUP BY u.id, r.nombre
      ORDER BY u.nombre_completo ASC`,
+    [communityId],
   );
 
   return result.rows;
 }
 
-export async function getUserById(userId) {
+export async function getUserById(userId, communityId) {
   const result = await query(
     `${usersBaseQuery}
      WHERE u.firebase_uid = $1
+       AND u.comunidad_id = $2
      GROUP BY u.id, r.nombre`,
-    [userId],
+    [userId, communityId],
   );
 
   return result.rows[0] ?? null;
 }
 
-export async function listRecentUserAudit(limitValue) {
+export async function listRecentUserAudit(limitValue, communityId) {
   const result = await query(
     `
       SELECT
@@ -62,16 +68,20 @@ export async function listRecentUserAudit(limitValue) {
       LEFT JOIN roles actor_role ON actor_role.id = actor.rol_id
       LEFT JOIN usuarios affected ON affected.id = ba.afectado_usuario_id
       WHERE ba.entidad = 'usuarios'
+        AND (
+          actor.comunidad_id = $2
+          OR affected.comunidad_id = $2
+        )
       ORDER BY ba.creado_en DESC
       LIMIT $1
     `,
-    [limitValue],
+    [limitValue, communityId],
   );
 
   return result.rows;
 }
 
-export async function updateUserRoleByFirebaseUid(firebaseUid, roleName) {
+export async function updateUserRoleByFirebaseUid(firebaseUid, roleName, communityId) {
   const result = await query(
     `
       UPDATE usuarios u
@@ -80,16 +90,17 @@ export async function updateUserRoleByFirebaseUid(firebaseUid, roleName) {
         actualizado_en = now()
       FROM roles r
       WHERE u.firebase_uid = $1
+        AND u.comunidad_id = $3
         AND r.nombre = $2::rol_usuario
       RETURNING u.id, u.firebase_uid
     `,
-    [firebaseUid, roleName],
+    [firebaseUid, roleName, communityId],
   );
 
   return result.rows[0] ?? null;
 }
 
-export async function updateUserStatusByFirebaseUid(firebaseUid, statusName) {
+export async function updateUserStatusByFirebaseUid(firebaseUid, statusName, communityId) {
   const result = await query(
     `
       UPDATE usuarios
@@ -97,15 +108,16 @@ export async function updateUserStatusByFirebaseUid(firebaseUid, statusName) {
         estado = $2::estado_usuario,
         actualizado_en = now()
       WHERE firebase_uid = $1
+        AND comunidad_id = $3
       RETURNING id, firebase_uid
     `,
-    [firebaseUid, statusName],
+    [firebaseUid, statusName, communityId],
   );
 
   return result.rows[0] ?? null;
 }
 
-export async function revokeUserSessionsByFirebaseUid(firebaseUid) {
+export async function revokeUserSessionsByFirebaseUid(firebaseUid, communityId) {
   const result = await query(
     `
       UPDATE sesiones_usuario su
@@ -113,10 +125,11 @@ export async function revokeUserSessionsByFirebaseUid(firebaseUid) {
       FROM usuarios u
       WHERE u.id = su.usuario_id
         AND u.firebase_uid = $1
+        AND u.comunidad_id = $2
         AND su.revocado_en IS NULL
       RETURNING su.id
     `,
-    [firebaseUid],
+    [firebaseUid, communityId],
   );
 
   return result.rowCount ?? 0;
@@ -155,11 +168,13 @@ export async function createUserProfile({
   role,
   status,
   site,
+  communityId,
 }) {
   const result = await query(
     `
       INSERT INTO usuarios (
         firebase_uid,
+        comunidad_id,
         rol_id,
         nombre_completo,
         correo,
@@ -168,15 +183,17 @@ export async function createUserProfile({
       )
       SELECT
         $1,
-        r.id,
         $2,
+        r.id,
         $3,
-        $4::estado_usuario,
-        $5
+        $4,
+        $5::estado_usuario,
+        $6
       FROM roles r
-      WHERE r.nombre = $6::rol_usuario
+      WHERE r.nombre = $7::rol_usuario
       ON CONFLICT (firebase_uid)
       DO UPDATE SET
+        comunidad_id = EXCLUDED.comunidad_id,
         rol_id = EXCLUDED.rol_id,
         nombre_completo = EXCLUDED.nombre_completo,
         correo = EXCLUDED.correo,
@@ -185,7 +202,28 @@ export async function createUserProfile({
         actualizado_en = now()
       RETURNING id, firebase_uid
     `,
-    [firebaseUid, fullName, email, status, site, role],
+    [firebaseUid, communityId, fullName, email, status, site, role],
+  );
+
+  return result.rows[0] ?? null;
+}
+
+export async function getAccessScopeByFirebaseUid(firebaseUid) {
+  const result = await query(
+    `
+      SELECT
+        u.id,
+        u.firebase_uid,
+        u.comunidad_id,
+        c.nombre AS comunidad_nombre,
+        r.nombre AS rol
+      FROM usuarios u
+      JOIN roles r ON r.id = u.rol_id
+      LEFT JOIN comunidades c ON c.id = u.comunidad_id
+      WHERE u.firebase_uid = $1
+      LIMIT 1
+    `,
+    [firebaseUid],
   );
 
   return result.rows[0] ?? null;

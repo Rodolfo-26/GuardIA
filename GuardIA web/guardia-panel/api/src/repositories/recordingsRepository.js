@@ -45,7 +45,13 @@ const recordingsBaseQuery = `
   ) evidence ON true
 `;
 
-export async function listRecordings() {
-  const result = await query(`${recordingsBaseQuery} ORDER BY g.inicio_en DESC`);
+export async function listRecordings(communityId) {
+  const result = await query(
+    `${recordingsBaseQuery}
+     JOIN sedes s ON s.id = z.sede_id
+     WHERE s.comunidad_id = $1
+     ORDER BY g.inicio_en DESC`,
+    [communityId],
+  );
   return result.rows;
 }

@@ -9,7 +9,6 @@ import {
   registerUserLogout,
   type AppUserRole,
 } from "../services/users";
-import { reportLoginEvent } from "../services/activityLogs";
 
 type AuthContextType = {
   user: User | null;
@@ -90,7 +89,6 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       try {
         await registerUserLogin(credentials.user);
         await hydrateUserSecurity(credentials.user);
-        reportLoginEvent("login", email).catch(() => {});
       } catch (error) {
         // Login ya fue exitoso; este error no debe bloquear acceso.
         console.error("Login exitoso, pero fallo una sincronizacion posterior:", error);
@@ -100,7 +98,6 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       const code = typeof error === "object" && error && "code" in error ? String(error.code) : "";
 
       if (code === "auth/invalid-credential" || code === "auth/wrong-password" || code === "auth/user-not-found") {
-        reportLoginEvent("login_failed", email).catch(() => {});
         return { ok: false, message: "Credenciales incorrectas" };
       }
 
@@ -174,7 +171,6 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       window.sessionStorage.removeItem(getSecondFactorPendingKey(firebaseAuth.currentUser.uid));
       try {
         await registerUserLogout(firebaseAuth.currentUser);
-        reportLoginEvent("logout", firebaseAuth.currentUser.email || "").catch(() => {});
       } catch (error) {
         // No debe bloquear el cierre de sesion si falla el registro operativo.
         console.error("No fue posible registrar el logout del usuario:", error);
