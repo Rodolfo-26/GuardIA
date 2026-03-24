@@ -1,5 +1,5 @@
 import { useNavigate } from "react-router-dom";
-import { canAccessCameraInventory, canAccessDashboard, canAccessResidents, canManageUsers } from "../../config/roleAccess";
+import { canAccessCameraInventory, canAccessDashboard, canManageUsers } from "../../config/roleAccess";
 import { useAuth } from "../../context/AuthContext";
 import NavItem from "./NavItem";
 
@@ -79,7 +79,6 @@ export default function Sidebar({
                 <NavItem label="Reportes" to="/reportes" />
                 <NavItem label="Alertas" to="/alertas" />
                 <NavItem label="Grabaciones" to="/grabaciones" />
-                {canAccessResidents(appRole) && <NavItem label="Residentes" to="/residentes" />}
                 <NavItem label={usersLabel} to="/usuarios" />
               </nav>
             </div>

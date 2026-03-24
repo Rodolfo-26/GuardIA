@@ -1,8 +1,10 @@
 import { useEffect, useMemo, useState } from "react";
 import { EmailAuthProvider, reauthenticateWithCredential } from "firebase/auth";
+import { fetchResidents, type ResidentRecord, type ResidentStatus } from "../services/residents";
 import {
   closeUserSessions,
   createUserWithAuth,
+  deleteUserAccount,
   subscribeCurrentUser,
   subscribeUserAuditLogs,
   subscribeUsers,
@@ -27,6 +29,7 @@ export default function UsuariosPage() {
   const [auditError, setAuditError] = useState("");
   const [error, setError] = useState("");
   const [viewMode, setViewMode] = useState<"full" | "self">("full");
+  const [directoryView, setDirectoryView] = useState<"users" | "residents">("users");
   const [actionError, setActionError] = useState("");
   const [actionSuccess, setActionSuccess] = useState("");
   const [query, setQuery] = useState("");
@@ -39,6 +42,14 @@ export default function UsuariosPage() {
   const [showAuditModal, setShowAuditModal] = useState(false);
   const [page, setPage] = useState(1);
   const pageSize = 8;
+  const [residents, setResidents] = useState<ResidentRecord[]>([]);
+  const [residentsLoading, setResidentsLoading] = useState(false);
+  const [residentsError, setResidentsError] = useState("");
+  const [residentQuery, setResidentQuery] = useState("");
+  const [residentStatusFilter, setResidentStatusFilter] = useState<ResidentStatus | "Todos">("Todos");
+  const [residentSelectedId, setResidentSelectedId] = useState("");
+  const [residentPage, setResidentPage] = useState(1);
+  const residentPageSize = 8;
   const [roleVerification, setRoleVerification] = useState<{
     targetId: string;
     targetName: string;
@@ -115,6 +126,7 @@ export default function UsuariosPage() {
     if (viewMode === "self") {
       setAuditLogs([]);
       setAuditError("");
+      setDirectoryView("users");
       return;
     }
 
@@ -129,6 +141,42 @@ export default function UsuariosPage() {
     );
 
     return () => unsubscribe();
+  }, [viewMode]);
+
+  useEffect(() => {
+    if (viewMode === "self") {
+      setResidents([]);
+      setResidentsError("");
+      setResidentsLoading(false);
+      return;
+    }
+
+    let cancelled = false;
+
+    async function loadResidents() {
+      setResidentsLoading(true);
+      setResidentsError("");
+      try {
+        const items = await fetchResidents();
+        if (!cancelled) {
+          setResidents(items);
+        }
+      } catch (loadError) {
+        if (!cancelled) {
+          setResidentsError(loadError instanceof Error ? loadError.message : "No fue posible cargar los residentes.");
+        }
+      } finally {
+        if (!cancelled) {
+          setResidentsLoading(false);
+        }
+      }
+    }
+
+    void loadResidents();
+
+    return () => {
+      cancelled = true;
+    };
   }, [viewMode]);
 
   useEffect(() => {
@@ -160,6 +208,10 @@ export default function UsuariosPage() {
   }, [query, roleFilter, statusFilter, viewMode]);
 
   useEffect(() => {
+    setResidentPage(1);
+  }, [residentQuery, residentStatusFilter, viewMode]);
+
+  useEffect(() => {
     if (!pendingSelectId) return;
     if (!users.some((item) => item.id === pendingSelectId)) return;
     setSelectedId(pendingSelectId);
@@ -189,9 +241,50 @@ export default function UsuariosPage() {
     }
   }, [page, totalPages]);
 
+  const filteredResidents = useMemo(() => {
+    const normalized = residentQuery.trim().toLowerCase();
+
+    return residents.filter((resident) => {
+      const matchesQuery =
+        !normalized ||
+        resident.fullName.toLowerCase().includes(normalized) ||
+        resident.email.toLowerCase().includes(normalized) ||
+        resident.unit.toLowerCase().includes(normalized) ||
+        resident.phone.toLowerCase().includes(normalized);
+
+      const matchesStatus = residentStatusFilter === "Todos" || resident.status === residentStatusFilter;
+      return matchesQuery && matchesStatus;
+    });
+  }, [residentQuery, residentStatusFilter, residents]);
+
+  useEffect(() => {
+    if (!filteredResidents.length) {
+      setResidentSelectedId("");
+      return;
+    }
+
+    if (!filteredResidents.some((item) => item.id === residentSelectedId)) {
+      setResidentSelectedId(filteredResidents[0].id);
+    }
+  }, [filteredResidents, residentSelectedId]);
+
+  const residentTotalPages = Math.max(1, Math.ceil(filteredResidents.length / residentPageSize));
+  const paginatedResidents = useMemo(() => {
+    const start = (residentPage - 1) * residentPageSize;
+    return filteredResidents.slice(start, start + residentPageSize);
+  }, [filteredResidents, residentPage, residentPageSize]);
+
+  useEffect(() => {
+    if (residentPage > residentTotalPages) {
+      setResidentPage(residentTotalPages);
+    }
+  }, [residentPage, residentTotalPages]);
+
   const selected = filtered.find((user) => user.id === selectedId) ?? null;
+  const selectedResident = filteredResidents.find((resident) => resident.id === residentSelectedId) ?? null;
   const detailUser = users.find((item) => item.id === detailUserId) ?? null;
   const currentProfile = users.find((item) => item.id === currentUserId) ?? null;
+  const canDeleteUsers = currentProfile?.role === "Admin";
   const isSelfView = viewMode === "self";
   const recentAuditLogs = auditLogs.slice(0, 5);
 
@@ -207,6 +300,20 @@ export default function UsuariosPage() {
       { active: 0, inactive: 0, blocked: 0, operators: 0 },
     );
   }, [users]);
+
+  const residentCounters = useMemo(
+    () =>
+      residents.reduce(
+        (acc, resident) => {
+          if (resident.status === "Activo") acc.active += 1;
+          if (resident.status === "Moroso") acc.debt += 1;
+          if (resident.status === "Visitante") acc.visits += 1;
+          return acc;
+        },
+        { active: 0, debt: 0, visits: 0 },
+      ),
+    [residents],
+  );
 
   async function withAction(run: () => Promise<void>) {
     setActionError("");
@@ -249,6 +356,24 @@ export default function UsuariosPage() {
     });
   }
 
+  function handleDeleteUser() {
+    if (!selected) return;
+    if (selected.id === currentUserId) {
+      setActionError("No puedes eliminar tu propia cuenta desde el panel.");
+      return;
+    }
+
+    const confirmed = window.confirm(`Se eliminara el acceso de ${selected.fullName} en PostgreSQL y Firebase. Esta accion no se puede deshacer.`);
+    if (!confirmed) return;
+
+    void withAction(async () => {
+      await deleteUserAccount(selected.id);
+      setUsers((prev) => prev.filter((item) => item.id !== selected.id));
+      setDetailUserId(null);
+      setActionSuccess("Usuario eliminado correctamente.");
+    });
+  }
+
   async function handleCreateUser(draft: {
     fullName: string;
     email: string;
@@ -270,11 +395,46 @@ export default function UsuariosPage() {
   return (
     <section className="space-y-4">
       {!isSelfView ? (
-        <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-3">
-          <MetricCard label="Usuarios activos" value={`${counters.active}`} tone="emerald" sub="Sesion habilitada" />
-          <MetricCard label="Usuarios inactivos" value={`${counters.inactive}`} tone="amber" sub="Sin actividad reciente" />
-          <MetricCard label="Bloqueados" value={`${counters.blocked}`} tone="rose" sub="Requieren revision" />
-        </div>
+        <>
+          <div className="inline-flex rounded-2xl border border-cyan-300/20 bg-slate-900/70 p-1 backdrop-blur">
+            <button
+              type="button"
+              onClick={() => setDirectoryView("users")}
+              className={`rounded-xl px-4 py-2 text-sm font-semibold transition ${
+                directoryView === "users"
+                  ? "bg-cyan-400/15 text-cyan-100"
+                  : "text-slate-300 hover:bg-white/5"
+              }`}
+            >
+              Usuarios
+            </button>
+            <button
+              type="button"
+              onClick={() => setDirectoryView("residents")}
+              className={`rounded-xl px-4 py-2 text-sm font-semibold transition ${
+                directoryView === "residents"
+                  ? "bg-cyan-400/15 text-cyan-100"
+                  : "text-slate-300 hover:bg-white/5"
+              }`}
+            >
+              Residentes
+            </button>
+          </div>
+
+          {directoryView === "users" ? (
+            <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-3">
+              <MetricCard label="Usuarios activos" value={`${counters.active}`} tone="emerald" sub="Sesion habilitada" />
+              <MetricCard label="Usuarios inactivos" value={`${counters.inactive}`} tone="amber" sub="Sin actividad reciente" />
+              <MetricCard label="Bloqueados" value={`${counters.blocked}`} tone="rose" sub="Requieren revision" />
+            </div>
+          ) : (
+            <div className="grid gap-3 sm:grid-cols-3">
+              <MetricCard label="Residentes activos" value={`${residentCounters.active}`} tone="emerald" sub="Acceso habilitado" />
+              <MetricCard label="Morosos" value={`${residentCounters.debt}`} tone="rose" sub="Requieren seguimiento" />
+              <MetricCard label="Visitantes" value={`${residentCounters.visits}`} tone="amber" sub="Referencias temporales" />
+            </div>
+          )}
+        </>
       ) : (
         <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-3">
           <MetricCard label="Mi rol" value={currentProfile?.role ?? "-"} tone="cyan" sub="Perfil operativo actual" />
@@ -283,7 +443,7 @@ export default function UsuariosPage() {
         </div>
       )}
 
-      {!isSelfView && (
+      {!isSelfView && directoryView === "users" && (
         <div className="rounded-2xl border border-cyan-300/20 bg-slate-900/70 p-4 backdrop-blur">
           <div className="grid gap-3 lg:grid-cols-[1.2fr_0.7fr_0.7fr_auto]">
             <input
@@ -326,6 +486,41 @@ export default function UsuariosPage() {
         </div>
       )}
 
+      {!isSelfView && directoryView === "residents" && (
+        <div className="rounded-2xl border border-cyan-300/20 bg-slate-900/70 p-4 backdrop-blur">
+          <div className="grid gap-3 lg:grid-cols-[1.2fr_0.8fr_auto]">
+            <input
+              className="w-full rounded-xl border border-cyan-300/20 bg-slate-950/80 px-4 py-2.5 text-sm text-slate-100 outline-none placeholder:text-slate-400 focus:border-cyan-300 focus:ring-2 focus:ring-cyan-400/30"
+              placeholder="Buscar por nombre, correo, telefono o unidad..."
+              value={residentQuery}
+              onChange={(event) => setResidentQuery(event.target.value)}
+            />
+
+            <select
+              className="rounded-xl border border-cyan-300/20 bg-slate-950/80 px-3 py-2.5 text-sm text-slate-100 outline-none focus:border-cyan-300 focus:ring-2 focus:ring-cyan-400/30"
+              value={residentStatusFilter}
+              onChange={(event) => setResidentStatusFilter(event.target.value as ResidentStatus | "Todos")}
+            >
+              <option value="Todos">Todos</option>
+              <option value="Activo">Activo</option>
+              <option value="Inactivo">Inactivo</option>
+              <option value="Moroso">Moroso</option>
+              <option value="Visitante">Visitante</option>
+            </select>
+
+            <div className="inline-flex items-center justify-center rounded-xl border border-cyan-300/20 bg-slate-950/60 px-4 py-2.5 text-sm font-semibold text-cyan-100">
+              {filteredResidents.length} registros
+            </div>
+          </div>
+
+          {residentsError && (
+            <p className="mt-3 rounded-xl border border-rose-300/30 bg-rose-400/10 px-3 py-2 text-sm text-rose-100">
+              {residentsError}
+            </p>
+          )}
+        </div>
+      )}
+
       {error && (
         <div className="rounded-xl border border-rose-400/30 bg-rose-500/10 px-4 py-3 text-sm text-rose-200">
           {error}
@@ -344,7 +539,7 @@ export default function UsuariosPage() {
         </div>
       )}
 
-      {!isSelfView ? (
+      {!isSelfView && directoryView === "users" ? (
         <>
         <div className="grid gap-4">
         <article className="rounded-2xl border border-cyan-300/20 bg-slate-900/70 p-4 backdrop-blur">
@@ -480,6 +675,118 @@ export default function UsuariosPage() {
         </div>
       </article>
       </>
+      ) : !isSelfView && directoryView === "residents" ? (
+        <div className="grid gap-4 xl:grid-cols-[1.1fr_0.9fr]">
+          <article className="rounded-2xl border border-cyan-300/20 bg-slate-900/70 p-4 backdrop-blur">
+            <div className="flex flex-wrap items-center justify-between gap-3">
+              <div>
+                <h3 className="text-sm font-bold uppercase tracking-[0.16em] text-cyan-200">Padron de residentes</h3>
+                <p className="mt-1 text-xs text-slate-400">Listado unificado con paginacion para no saturar la vista.</p>
+              </div>
+              <span className="rounded-full border border-cyan-300/25 bg-cyan-400/10 px-3 py-1 text-xs font-semibold text-cyan-100">
+                Pagina {residentPage}/{residentTotalPages}
+              </span>
+            </div>
+
+            <div className="mt-4 space-y-2">
+              {residentsLoading ? (
+                <p className="rounded-xl border border-slate-700 bg-slate-950/70 p-3 text-sm text-slate-300">
+                  Cargando residentes de la comunidad...
+                </p>
+              ) : paginatedResidents.length ? (
+                paginatedResidents.map((resident) => {
+                  const isActive = resident.id === residentSelectedId;
+                  return (
+                    <button
+                      key={resident.id}
+                      type="button"
+                      onClick={() => setResidentSelectedId(resident.id)}
+                      className={`w-full rounded-xl border p-3 text-left transition ${
+                        isActive
+                          ? "border-cyan-300/45 bg-cyan-400/10"
+                          : "border-slate-700 bg-slate-950/70 hover:border-cyan-300/30"
+                      }`}
+                    >
+                      <div className="flex items-center justify-between gap-2">
+                        <div className="min-w-0">
+                          <p className="truncate text-sm font-semibold text-slate-100">{resident.fullName}</p>
+                          <p className="mt-1 truncate text-xs text-slate-300">{resident.unit}</p>
+                        </div>
+                        <ResidentStatusChip value={resident.status} />
+                      </div>
+                      <div className="mt-2 flex flex-wrap items-center gap-2 text-[11px] uppercase tracking-wider text-slate-400">
+                        <span>{resident.phone}</span>
+                        <span className="rounded-full border border-white/10 bg-white/5 px-2 py-0.5">
+                          Residente
+                        </span>
+                      </div>
+                    </button>
+                  );
+                })
+              ) : (
+                <p className="rounded-xl border border-slate-700 bg-slate-950/70 p-3 text-sm text-slate-300">
+                  No hay residentes con esos filtros.
+                </p>
+              )}
+            </div>
+
+            {filteredResidents.length > residentPageSize ? (
+              <div className="mt-4 flex flex-wrap items-center justify-between gap-3">
+                <p className="text-xs text-slate-400">
+                  Mostrando {(residentPage - 1) * residentPageSize + 1}-{Math.min(residentPage * residentPageSize, filteredResidents.length)} de {filteredResidents.length}
+                </p>
+                <div className="flex items-center gap-2">
+                  <button
+                    type="button"
+                    onClick={() => setResidentPage((current) => Math.max(1, current - 1))}
+                    disabled={residentPage === 1}
+                    className="rounded-xl border border-white/15 px-3 py-2 text-xs font-semibold text-slate-200 transition hover:bg-white/5 disabled:cursor-not-allowed disabled:opacity-40"
+                  >
+                    Anterior
+                  </button>
+                  <span className="rounded-lg border border-white/10 bg-white/5 px-3 py-2 text-xs font-semibold text-slate-300">
+                    {residentPage}
+                  </span>
+                  <button
+                    type="button"
+                    onClick={() => setResidentPage((current) => Math.min(residentTotalPages, current + 1))}
+                    disabled={residentPage === residentTotalPages}
+                    className="rounded-xl border border-cyan-300/30 bg-cyan-400/10 px-3 py-2 text-xs font-semibold text-cyan-100 transition hover:bg-cyan-400/20 disabled:cursor-not-allowed disabled:opacity-40"
+                  >
+                    Siguiente
+                  </button>
+                </div>
+              </div>
+            ) : null}
+          </article>
+
+          <article className="rounded-2xl border border-cyan-300/20 bg-slate-900/70 p-4 backdrop-blur">
+            <h3 className="text-sm font-bold uppercase tracking-[0.16em] text-cyan-200">Ficha residente</h3>
+
+            {selectedResident ? (
+              <div className="mt-4 space-y-4">
+                <div className="rounded-xl border border-cyan-300/20 bg-[radial-gradient(circle_at_25%_30%,rgba(56,189,248,0.25),transparent_45%),linear-gradient(120deg,rgba(15,23,42,0.96),rgba(8,47,73,0.86),rgba(6,95,70,0.8))] p-4">
+                  <p className="text-xl font-black text-white">{selectedResident.fullName}</p>
+                  <p className="mt-1 text-sm text-slate-200">{selectedResident.community}</p>
+                </div>
+
+                <div className="grid gap-2">
+                  <DetailRow label="Tipo" value="Residente" />
+                  <DetailRow label="Estado" value={selectedResident.status} />
+                  <DetailRow label="Unidad" value={selectedResident.unit} />
+                  <DetailRow label="Correo" value={selectedResident.email} />
+                  <DetailRow label="Telefono" value={selectedResident.phone} />
+                  <DetailRow label="Referencia" value={selectedResident.accessReference} />
+                  <DetailRow label="Notas" value={selectedResident.notes} />
+                </div>
+              </div>
+            ) : (
+              <p className="mt-4 rounded-xl border border-slate-700 bg-slate-950/70 p-3 text-sm text-slate-300">
+                No hay residente seleccionado.
+              </p>
+            )}
+          </article>
+        </div>
       ) : (
         <div className="grid gap-4 xl:grid-cols-[1.1fr_0.9fr]">
           <article className="rounded-2xl border border-cyan-300/20 bg-slate-900/70 p-4 backdrop-blur">
@@ -743,6 +1050,19 @@ export default function UsuariosPage() {
                   Cerrar sesiones activas
                 </button>
 
+                {canDeleteUsers ? (
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setSelectedId(detailUser.id);
+                      handleDeleteUser();
+                    }}
+                    className="w-full rounded-xl border border-rose-400/40 bg-rose-500/15 px-3 py-2 text-sm font-semibold text-rose-100 transition hover:bg-rose-500/25"
+                  >
+                    Eliminar usuario
+                  </button>
+                ) : null}
+
                 <div className="rounded-xl border border-slate-700 bg-slate-950/70 p-3">
                   <p className="text-xs uppercase tracking-[0.14em] text-slate-400">Politica recomendada</p>
                   <p className="mt-2 text-sm text-slate-300">
@@ -756,4 +1076,17 @@ export default function UsuariosPage() {
       )}
     </section>
   );
+}
+
+function ResidentStatusChip({ value }: { value: ResidentStatus }) {
+  const cls =
+    value === "Activo"
+      ? "border-emerald-300/30 bg-emerald-400/10 text-emerald-200"
+      : value === "Moroso"
+        ? "border-rose-300/30 bg-rose-400/10 text-rose-200"
+        : value === "Visitante"
+          ? "border-amber-300/30 bg-amber-400/10 text-amber-200"
+          : "border-slate-500/30 bg-slate-400/10 text-slate-300";
+
+  return <span className={`rounded-full border px-2 py-0.5 text-[10px] font-semibold ${cls}`}>{value}</span>;
 }

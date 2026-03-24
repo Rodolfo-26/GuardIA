@@ -5,9 +5,11 @@ import fs from "fs";
 import readline from "readline";
 import { attachAuthContext, requireAuth, requireRole } from "./authMiddleware.js";
 import { pool, query } from "./db.js";
+import { firebaseAdminAuth, firebaseAdminDb } from "./firebaseAdmin.js";
 import {
   createAuditEntry,
   createUserProfile,
+  deleteUserByFirebaseUid,
   getUserById,
   listRecentUserAudit,
   listUsers,
@@ -508,6 +510,67 @@ app.post("/users/:id/close-sessions", requireAuth, requireRole(["Admin", "Superv
 
     logEvent("info", "CRUD_USERS", "close_sessions", `Sesiones del usuario ${req.params.id} cerradas desde el panel`, {
       firebaseUid: req.params.id,
+      communityId,
+    });
+
+    res.json({ ok: true });
+  } catch (error) {
+    next(error);
+  }
+});
+
+app.delete("/users/:id", requireAuth, requireRole(["Admin"]), async (req, res, next) => {
+  try {
+    const communityId = requireCommunityScope(req, res);
+    if (!communityId) return;
+
+    if (req.authContext?.uid === req.params.id) {
+      res.status(400).json({ message: "No puedes eliminar tu propia cuenta desde el panel." });
+      return;
+    }
+
+    const target = await getUserById(req.params.id, communityId);
+    if (!target) {
+      res.status(404).json({ message: "Usuario no encontrado." });
+      return;
+    }
+
+    await createAuditEntry({
+      actorFirebaseUid: req.authContext?.uid ?? null,
+      targetFirebaseUid: req.params.id,
+      action: "delete_user",
+      changes: {
+        email: target.correo,
+        role: target.rol,
+        status: target.estado,
+        communityId,
+      },
+    });
+
+    try {
+      await firebaseAdminAuth.deleteUser(req.params.id);
+    } catch (error) {
+      const code = typeof error === "object" && error && "code" in error ? String(error.code) : "";
+      if (code !== "auth/user-not-found") {
+        throw error;
+      }
+    }
+
+    try {
+      await firebaseAdminDb.collection("usuarios").doc(req.params.id).delete();
+    } catch {
+      // El perfil de Firestore es secundario; no bloquea la eliminacion principal.
+    }
+
+    const deleted = await deleteUserByFirebaseUid(req.params.id, communityId);
+    if (!deleted) {
+      res.status(404).json({ message: "Usuario no encontrado." });
+      return;
+    }
+
+    logEvent("info", "CRUD_USERS", "delete_user", `Usuario '${target.nombre_completo}' eliminado`, {
+      firebaseUid: req.params.id,
+      email: target.correo,
       communityId,
     });
 

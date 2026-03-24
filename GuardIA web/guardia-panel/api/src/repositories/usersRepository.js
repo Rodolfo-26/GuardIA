@@ -1,4 +1,4 @@
-import { query } from "../db.js";
+import { pool, query } from "../db.js";
 
 const usersBaseQuery = `
   SELECT
@@ -136,6 +136,7 @@ export async function revokeUserSessionsByFirebaseUid(firebaseUid, communityId) 
 }
 
 export async function createAuditEntry({
+  actorFirebaseUid = null,
   targetFirebaseUid,
   action,
   changes,
@@ -150,15 +151,60 @@ export async function createAuditEntry({
         cambios_json
       )
       VALUES (
-        NULL,
         (SELECT id FROM usuarios WHERE firebase_uid = $1 LIMIT 1),
-        $2,
+        (SELECT id FROM usuarios WHERE firebase_uid = $2 LIMIT 1),
+        $3,
         'usuarios',
-        $3::jsonb
+        $4::jsonb
       )
     `,
-    [targetFirebaseUid, action, JSON.stringify(changes ?? {})],
+    [actorFirebaseUid, targetFirebaseUid, action, JSON.stringify(changes ?? {})],
   );
+}
+
+export async function deleteUserByFirebaseUid(firebaseUid, communityId) {
+  const client = await pool.connect();
+
+  try {
+    await client.query("BEGIN");
+
+    const lookup = await client.query(
+      `
+        SELECT id, firebase_uid, nombre_completo, correo
+        FROM usuarios
+        WHERE firebase_uid = $1
+          AND comunidad_id = $2
+        LIMIT 1
+      `,
+      [firebaseUid, communityId],
+    );
+
+    const target = lookup.rows[0] ?? null;
+    if (!target) {
+      await client.query("ROLLBACK");
+      return null;
+    }
+
+    await client.query("DELETE FROM reportes WHERE created_by_user_id = $1", [target.id]);
+    await client.query("DELETE FROM acciones_alerta WHERE usuario_id = $1", [target.id]);
+    await client.query("DELETE FROM sesiones_usuario WHERE usuario_id = $1", [target.id]);
+
+    await client.query(
+      `
+        DELETE FROM usuarios
+        WHERE id = $1
+      `,
+      [target.id],
+    );
+
+    await client.query("COMMIT");
+    return target;
+  } catch (error) {
+    await client.query("ROLLBACK");
+    throw error;
+  } finally {
+    client.release();
+  }
 }
 
 export async function createUserProfile({

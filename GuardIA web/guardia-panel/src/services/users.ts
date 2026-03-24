@@ -168,6 +168,12 @@ export async function closeUserSessions(userId: string) {
   });
 }
 
+export async function deleteUserAccount(userId: string) {
+  await apiSend<{ ok: boolean }>(`/users/${userId}`, {
+    method: "DELETE",
+  });
+}
+
 export async function createUserWithAuth(input: {
   fullName: string;
   email: string;

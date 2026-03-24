@@ -29,10 +29,6 @@ const PAGE_META: Record<string, { title: string; subtitle: string }> = {
     title: "Grabaciones",
     subtitle: "Historial forense y evidencia de video",
   },
-  "/residentes": {
-    title: "Residentes",
-    subtitle: "Padron comunitario y control de referencias de acceso",
-  },
   "/usuarios": {
     title: "Usuarios",
     subtitle: "Gestion de cuentas, roles y control de sesiones",
