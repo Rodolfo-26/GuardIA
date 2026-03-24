@@ -1,9 +1,13 @@
 import { useEffect, useMemo, useState } from "react";
+import { canManageCameras } from "../../config/roleAccess";
+import { useAuth } from "../../context/AuthContext";
 import CameraRegistrationModal from "./components/CameraRegistrationModal";
 import CameraDetailsModal from "./components/CameraDetailsModal";
 import { createCameraRecord, fetchCameras, updateCameraRecord, type CameraRecord } from "../../services/cameras";
 
 export default function CamerasPage() {
+  const { appRole } = useAuth();
+  const canManage = canManageCameras(appRole);
   const [cameras, setCameras] = useState<CameraRecord[]>([]);
   const [isLoading, setIsLoading] = useState(true);
   const [error, setError] = useState("");
@@ -52,11 +56,13 @@ export default function CamerasPage() {
   }, [cameras]);
 
   function openCreateModal() {
+    if (!canManage) return;
     setEditing(null);
     setModalOpen(true);
   }
 
   function openEditModal(cam: CameraRecord) {
+    if (!canManage) return;
     setEditing(cam);
     setModalOpen(true);
   }
@@ -149,13 +155,19 @@ export default function CamerasPage() {
             placeholder="Buscar por nombre, zona o protocolo..."
             className="w-full rounded-xl border border-cyan-300/20 bg-slate-950/70 px-4 py-2.5 text-sm text-slate-100 outline-none placeholder:text-slate-500 focus:border-cyan-300 sm:max-w-md"
           />
-          <button
-            type="button"
-            onClick={openCreateModal}
-            className="rounded-xl bg-gradient-to-r from-cyan-500 to-emerald-500 px-4 py-2.5 text-sm font-bold text-slate-950 transition hover:brightness-110"
-          >
-            Registrar camara
-          </button>
+          {canManage ? (
+            <button
+              type="button"
+              onClick={openCreateModal}
+              className="rounded-xl bg-gradient-to-r from-cyan-500 to-emerald-500 px-4 py-2.5 text-sm font-bold text-slate-950 transition hover:brightness-110"
+            >
+              Registrar camara
+            </button>
+          ) : (
+            <div className="rounded-xl border border-cyan-300/25 bg-cyan-400/10 px-4 py-2.5 text-sm font-semibold text-cyan-100">
+              Vista operativa de camaras
+            </div>
+          )}
           </div>
         </div>
 
@@ -201,13 +213,15 @@ export default function CamerasPage() {
                   >
                     Detalles
                   </button>
-                  <button
-                    type="button"
-                    onClick={() => openEditModal(cam)}
-                    className="rounded-lg border border-cyan-300/25 px-3 py-1.5 text-xs font-semibold text-cyan-100 hover:bg-cyan-400/10"
-                  >
-                    Configurar
-                  </button>
+                  {canManage ? (
+                    <button
+                      type="button"
+                      onClick={() => openEditModal(cam)}
+                      className="rounded-lg border border-cyan-300/25 px-3 py-1.5 text-xs font-semibold text-cyan-100 hover:bg-cyan-400/10"
+                    >
+                      Configurar
+                    </button>
+                  ) : null}
                 </div>
               </footer>
             </article>
@@ -243,6 +257,7 @@ export default function CamerasPage() {
       <CameraDetailsModal
         camera={detailsCamera}
         onClose={closeDetailsModal}
+        allowConfigure={canManage}
         onConfigure={(camera) => {
           closeDetailsModal();
           openEditModal(camera);

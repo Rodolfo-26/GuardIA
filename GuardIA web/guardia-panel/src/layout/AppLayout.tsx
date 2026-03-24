@@ -1,6 +1,7 @@
 import { Outlet, useLocation } from "react-router-dom";
 import { useState } from "react";
 import Sidebar from "../components/sidebar/Sidebar";
+import { canManageUsers } from "../config/roleAccess";
 import { useAuth } from "../context/AuthContext";
 
 const PAGE_META: Record<string, { title: string; subtitle: string }> = {
@@ -49,7 +50,7 @@ export default function AppLayout() {
   };
 
   const meta =
-    pathname === "/usuarios" && appRole !== "Admin" && appRole !== "Supervisor"
+    pathname === "/usuarios" && !canManageUsers(appRole)
       ? {
           title: "Mi perfil",
           subtitle: "Informacion de cuenta y permisos de acceso",

@@ -1,4 +1,6 @@
 import { useEffect, useMemo, useState } from "react";
+import { canManageCameras } from "../config/roleAccess";
+import { useAuth } from "../context/AuthContext";
 import { fetchCameras, type CameraRecord } from "../services/cameras";
 import CameraConfigModal from "./components/CameraConfigModal";
 import CameraFullscreenModal from "./components/CameraFullscreenModal";
@@ -22,6 +24,8 @@ function toMonitoringCamera(camera: CameraRecord): Camera {
 }
 
 export default function Monitoreo() {
+  const { appRole } = useAuth();
+  const canManage = canManageCameras(appRole);
   const [query, setQuery] = useState("");
   const [cameras, setCameras] = useState<Camera[]>([]);
   const [playing, setPlaying] = useState<Record<string, boolean>>({});
@@ -79,7 +83,7 @@ export default function Monitoreo() {
   }
 
   function handleSaveConfig(patch: Pick<Camera, "recording" | "sensitivity" | "status" | "streamUrl">) {
-    if (!configId) return;
+    if (!configId || !canManage) return;
 
     setCameras((prev) =>
       prev.map((cam) =>
@@ -160,6 +164,7 @@ export default function Monitoreo() {
                 onTogglePlay={() => handleTogglePlay(cam.id)}
                 onOpenFullscreen={() => setFullscreenId(cam.id)}
                 onOpenConfig={() => setConfigId(cam.id)}
+                showConfigControl={canManage}
               />
             </div>
           ))}
@@ -176,11 +181,13 @@ export default function Monitoreo() {
         onClose={() => setFullscreenId(null)}
       />
 
-      <CameraConfigModal
-        camera={configCamera}
-        onClose={() => setConfigId(null)}
-        onSave={handleSaveConfig}
-      />
+      {canManage ? (
+        <CameraConfigModal
+          camera={configCamera}
+          onClose={() => setConfigId(null)}
+          onSave={handleSaveConfig}
+        />
+      ) : null}
     </>
   );
 }

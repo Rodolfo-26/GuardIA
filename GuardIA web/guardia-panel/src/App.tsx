@@ -3,6 +3,8 @@ import { Navigate, Route, Routes, useLocation } from "react-router-dom";
 import PanelTransition from "./components/overlays/PanelTransition";
 import SpyTransition from "./components/overlays/SpyTransition";
 import WelcomeOverlay from "./components/overlays/WelcomeOverlay";
+import { getDefaultPanelRoute } from "./config/roleAccess";
+import { useAuth } from "./context/AuthContext";
 import AppLayout from "./layout/AppLayout";
 import AlertasPage from "./pages/AlertasPage";
 import Dashboard from "./pages/Dashboard";
@@ -20,6 +22,7 @@ const WELCOME_STORAGE_KEY = "guardia_welcome_seen_v1";
 
 export default function App() {
   const { pathname } = useLocation();
+  const { appRole } = useAuth();
   const isLoginRoute = pathname === "/login";
   const [isBootLoading, setIsBootLoading] = useState(true);
   const [showWelcome, setShowWelcome] = useState<boolean>(() => {
@@ -37,6 +40,8 @@ export default function App() {
     setShowWelcome(false);
   }
 
+  const defaultPanelRoute = getDefaultPanelRoute(appRole);
+
   return (
     <>
       {isBootLoading && <SpyTransition key="boot-scan" />}
@@ -53,25 +58,39 @@ export default function App() {
             </ProtectedRoute>
           }
         >
-          <Route index element={<Navigate to="/dashboard" replace />} />
-          <Route path="/dashboard" element={<Dashboard />} />
+          <Route index element={<Navigate to={defaultPanelRoute} replace />} />
+          <Route
+            path="/dashboard"
+            element={
+              <RoleRoute allowedRoles={["Admin", "Supervisor"]} fallbackTo="/monitoreo">
+                <Dashboard />
+              </RoleRoute>
+            }
+          />
           <Route path="/monitoreo" element={<Monitoreo />} />
           <Route path="/reportes" element={<ReportesPage />} />
           <Route
             path="/camaras"
             element={
-              <RoleRoute allowedRoles={["Admin", "Supervisor"]}>
+              <RoleRoute allowedRoles={["Admin", "Supervisor", "Operador"]} fallbackTo="/monitoreo">
                 <CamerasPage />
               </RoleRoute>
             }
           />
           <Route path="/alertas" element={<AlertasPage />} />
           <Route path="/grabaciones" element={<GrabacionesPage />} />
-          <Route path="/residentes" element={<ResidentsPage />} />
+          <Route
+            path="/residentes"
+            element={
+              <RoleRoute allowedRoles={["Admin", "Supervisor"]} fallbackTo="/monitoreo">
+                <ResidentsPage />
+              </RoleRoute>
+            }
+          />
           <Route path="/usuarios" element={<UsuariosPage />} />
         </Route>
 
-        <Route path="*" element={<Navigate to="/dashboard" replace />} />
+        <Route path="*" element={<Navigate to={defaultPanelRoute} replace />} />
       </Routes>
     </>
   );

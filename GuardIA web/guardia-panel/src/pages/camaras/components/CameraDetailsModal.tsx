@@ -4,10 +4,12 @@ export default function CameraDetailsModal({
   camera,
   onClose,
   onConfigure,
+  allowConfigure = true,
 }: {
   camera: CameraRecord | null;
   onClose: () => void;
   onConfigure: (camera: CameraRecord) => void;
+  allowConfigure?: boolean;
 }) {
   if (!camera) return null;
 
@@ -59,17 +61,19 @@ export default function CameraDetailsModal({
           <button
             type="button"
             onClick={onClose}
-            className="w-full rounded-xl border border-white/15 px-3 py-2.5 text-sm font-semibold text-slate-200"
+            className={`${allowConfigure ? "w-full" : "w-full"} rounded-xl border border-white/15 px-3 py-2.5 text-sm font-semibold text-slate-200`}
           >
             Volver
           </button>
-          <button
-            type="button"
-            onClick={() => onConfigure(camera)}
-            className="w-full rounded-xl bg-gradient-to-r from-cyan-500 to-emerald-500 px-3 py-2.5 text-sm font-bold text-slate-950"
-          >
-            Configurar camara
-          </button>
+          {allowConfigure ? (
+            <button
+              type="button"
+              onClick={() => onConfigure(camera)}
+              className="w-full rounded-xl bg-gradient-to-r from-cyan-500 to-emerald-500 px-3 py-2.5 text-sm font-bold text-slate-950"
+            >
+              Configurar camara
+            </button>
+          ) : null}
         </div>
       </div>
     </div>

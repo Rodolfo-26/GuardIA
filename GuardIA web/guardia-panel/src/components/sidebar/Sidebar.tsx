@@ -1,4 +1,5 @@
 import { useNavigate } from "react-router-dom";
+import { canAccessCameraInventory, canAccessDashboard, canAccessResidents, canManageUsers } from "../../config/roleAccess";
 import { useAuth } from "../../context/AuthContext";
 import NavItem from "./NavItem";
 
@@ -13,8 +14,8 @@ export default function Sidebar({
 }) {
   const navigate = useNavigate();
   const { logout, appRole } = useAuth();
-  const isAdminOrSupervisor = appRole === "Admin" || appRole === "Supervisor";
-  const usersLabel = isAdminOrSupervisor ? "Usuarios" : "Mi perfil";
+  const usersLabel = canManageUsers(appRole) ? "Usuarios" : "Mi perfil";
+  const roleLabel = appRole === "Operador" ? "Guardia" : appRole ?? "Sin rol";
 
   async function handleLogout() {
     await logout();
@@ -50,6 +51,9 @@ export default function Sidebar({
               <div className="min-w-0">
                 <div className="truncate text-lg font-black leading-5 text-white">GuardIA</div>
                 <div className="truncate text-xs uppercase tracking-[0.16em] text-slate-300">Control Center</div>
+                <div className="mt-1 inline-flex rounded-full border border-cyan-300/20 bg-cyan-400/10 px-2 py-0.5 text-[10px] font-semibold uppercase tracking-[0.16em] text-cyan-100">
+                  {roleLabel}
+                </div>
               </div>
             </div>
 
@@ -69,13 +73,13 @@ export default function Sidebar({
           <div className="flex min-h-0 flex-1 flex-col bg-[linear-gradient(180deg,rgba(15,23,42,0.16),rgba(15,23,42,0))] p-4">
             <div className="p-4">
               <nav className="space-y-2 border-t border-white/10 pt-4">
-                <NavItem label="Dashboard" to="/dashboard" />
+                {canAccessDashboard(appRole) && <NavItem label="Dashboard" to="/dashboard" />}
                 <NavItem label="Monitoreo" to="/monitoreo" />
+                {canAccessCameraInventory(appRole) && <NavItem label="Camaras" to="/camaras" />}
                 <NavItem label="Reportes" to="/reportes" />
                 <NavItem label="Alertas" to="/alertas" />
                 <NavItem label="Grabaciones" to="/grabaciones" />
-                <NavItem label="Residentes" to="/residentes" />
-                {isAdminOrSupervisor && <NavItem label="Camaras" to="/camaras" />}
+                {canAccessResidents(appRole) && <NavItem label="Residentes" to="/residentes" />}
                 <NavItem label={usersLabel} to="/usuarios" />
               </nav>
             </div>

@@ -20,12 +20,14 @@ export default function VideoTile({
   onTogglePlay,
   onOpenFullscreen,
   onOpenConfig,
+  showConfigControl = true,
 }: {
   cam: Camera;
   isPlaying: boolean;
   onTogglePlay: () => void;
   onOpenFullscreen: () => void;
   onOpenConfig: () => void;
+  showConfigControl?: boolean;
 }) {
   const offline = cam.status === "offline";
 
@@ -70,9 +72,11 @@ export default function VideoTile({
           <IconButton title="Pantalla completa" onClick={onOpenFullscreen} disabled={offline}>
             FULL
           </IconButton>
-          <IconButton title="Configuracion" onClick={onOpenConfig}>
-            CFG
-          </IconButton>
+          {showConfigControl ? (
+            <IconButton title="Configuracion" onClick={onOpenConfig}>
+              CFG
+            </IconButton>
+          ) : null}
         </div>
       </footer>
     </article>
