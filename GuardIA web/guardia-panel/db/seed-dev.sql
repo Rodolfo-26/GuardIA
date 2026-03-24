@@ -75,6 +75,22 @@ WHERE NOT EXISTS (
   SELECT 1 FROM residentes WHERE comunidad_id = comunidad_demo.id
 );
 
+WITH operador_demo AS (
+  SELECT id FROM usuarios WHERE firebase_uid = 'firebase-operador-01' LIMIT 1
+)
+INSERT INTO reportes (created_by_user_id, role, type, priority, description, status, created_at, updated_at)
+SELECT operador_demo.id, values_table.role, values_table.type, values_table.priority, values_table.description, values_table.status, now() - values_table.offset_created, now() - values_table.offset_updated
+FROM operador_demo
+JOIN (
+  VALUES
+    ('operador', 'sospechoso', 'alta', 'Persona merodeando repetidamente en acceso norte sin identificacion visible.', 'sent', interval '18 minutes', interval '18 minutes'),
+    ('operador', 'robo', 'alta', 'Reporte preliminar de extravio de paqueteria en caseta de recepcion.', 'in_review', interval '2 hours', interval '95 minutes'),
+    ('operador', 'incendio', 'media', 'Olor a quemado y humo ligero reportado cerca del cuarto electrico.', 'closed', interval '1 day', interval '22 hours')
+) AS values_table(role, type, priority, description, status, offset_created, offset_updated) ON true
+WHERE NOT EXISTS (
+  SELECT 1 FROM reportes WHERE description = values_table.description
+);
+
 WITH actor AS (
   SELECT id FROM usuarios WHERE firebase_uid = 'firebase-admin-01' LIMIT 1
 ),

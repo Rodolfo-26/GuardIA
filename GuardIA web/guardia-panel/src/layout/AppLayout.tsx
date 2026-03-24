@@ -12,6 +12,10 @@ const PAGE_META: Record<string, { title: string; subtitle: string }> = {
     title: "Monitoreo",
     subtitle: "Camaras en vivo y deteccion de eventos en tiempo real",
   },
+  "/reportes": {
+    title: "Reportes",
+    subtitle: "Incidentes registrados por operadores y seguimiento de atencion",
+  },
   "/camaras": {
     title: "Camaras",
     subtitle: "Gestion de dispositivos y disponibilidad de nodos",

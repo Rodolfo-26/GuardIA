@@ -29,13 +29,20 @@ async function parseErrorMessage(response: Response) {
 }
 
 async function requestJson<T>(path: string, init?: RequestInit): Promise<T> {
+  const authHeaders = await getAuthHeaders();
+  const requestHeaders = new Headers(init?.headers);
+  requestHeaders.set("ngrok-skip-browser-warning", "true");
+
+  if (init?.body) {
+    requestHeaders.set("Content-Type", "application/json");
+  }
+
+  Object.entries(authHeaders).forEach(([key, value]) => {
+    requestHeaders.set(key, value);
+  });
+
   const response = await fetch(`${API_BASE_URL}${path}`, {
-    headers: {
-      "ngrok-skip-browser-warning": "true",
-      ...(init?.body ? { "Content-Type": "application/json" } : {}),
-      ...(await getAuthHeaders()),
-      ...(init?.headers || {}),
-    },
+    headers: requestHeaders,
     ...init,
   });
 

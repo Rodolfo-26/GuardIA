@@ -71,6 +71,7 @@ export default function Sidebar({
               <nav className="space-y-2 border-t border-white/10 pt-4">
                 <NavItem label="Dashboard" to="/dashboard" />
                 <NavItem label="Monitoreo" to="/monitoreo" />
+                <NavItem label="Reportes" to="/reportes" />
                 <NavItem label="Alertas" to="/alertas" />
                 <NavItem label="Grabaciones" to="/grabaciones" />
                 <NavItem label="Residentes" to="/residentes" />

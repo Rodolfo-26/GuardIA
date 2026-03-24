@@ -15,11 +15,12 @@ import {
   updateUserRoleByFirebaseUid,
   updateUserStatusByFirebaseUid,
 } from "./repositories/usersRepository.js";
-import { serializeAudit, serializeUser } from "./serializers.js";
+import { serializeAudit, serializeReport, serializeUser } from "./serializers.js";
 import { createAlertFromMobile, listAlerts, updateAlertWorkflow } from "./repositories/alertsRepository.js";
 import { createCamera, listCameras, updateCamera } from "./repositories/camerasRepository.js";
 import { listRecordings } from "./repositories/recordingsRepository.js";
 import { listResidents } from "./repositories/residentsRepository.js";
+import { createReport, listReports } from "./repositories/reportsRepository.js";
 import { logEvent, LOG_FILE_PATH } from "./logger.js";
 
 dotenv.config();
@@ -140,6 +141,18 @@ app.get("/alerts", requireAuth, async (req, res, next) => {
   }
 });
 
+app.get("/reports", requireAuth, async (req, res, next) => {
+  try {
+    const communityId = requireCommunityScope(req, res);
+    if (!communityId) return;
+
+    const items = await listReports(communityId);
+    res.json({ items: items.map(serializeReport), total: items.length });
+  } catch (error) {
+    next(error);
+  }
+});
+
 app.patch("/alerts/:id/workflow", requireAuth, requireRole(["Admin", "Supervisor", "Operador"]), async (req, res, next) => {
   try {
     const communityId = requireCommunityScope(req, res);
@@ -190,6 +203,28 @@ app.post("/reports", requireAuth, async (req, res, next) => {
     if (urgency === "Baja") severity = "baja";
     if (urgency === "Alta") severity = "alta";
 
+    const createdByUserId = req.authContext?.dbUserId;
+    if (!createdByUserId) {
+      res.status(403).json({ message: "No fue posible identificar al usuario que genera el reporte." });
+      return;
+    }
+
+    const reportPriorityMap = {
+      Baja: "baja",
+      Media: "media",
+      Alta: "alta",
+    };
+
+    const reportId = await createReport({
+      createdByUserId,
+      role: req.authContext?.role?.toLowerCase() || "operador",
+      type: type || "otro",
+      priority: reportPriorityMap[urgency] || "media",
+      ubicacion: location || null,
+      description: description || "Sin descripcion proporcionada",
+      status: "sent",
+    });
+
     const alertId = await createAlertFromMobile({
       communityId,
       title: `Reporte: ${type || "Otro"}`,
@@ -200,6 +235,7 @@ app.post("/reports", requireAuth, async (req, res, next) => {
     });
 
     logEvent("info", "CRUD_ALERTS", "create_report", `Reporte creado con id ${alertId}`, {
+      reportId,
       alertId,
       type,
       severity,
@@ -207,6 +243,7 @@ app.post("/reports", requireAuth, async (req, res, next) => {
     });
 
     res.status(201).json({
+      reportId,
       id: alertId,
       folio: `GIA-2026-${Date.now().toString().slice(-4)}`,
       status: "sent",

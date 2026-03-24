@@ -240,6 +240,19 @@ CREATE TABLE IF NOT EXISTS residentes (
   actualizado_en timestamptz NOT NULL DEFAULT now()
 );
 
+CREATE TABLE IF NOT EXISTS reportes (
+  id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+  created_by_user_id uuid NOT NULL REFERENCES usuarios(id) ON DELETE RESTRICT,
+  role text NOT NULL,
+  type text NOT NULL,
+  priority text NOT NULL CHECK (priority IN ('baja', 'media', 'alta')),
+  ubicacion text,
+  description text NOT NULL,
+  status text NOT NULL DEFAULT 'sent' CHECK (status IN ('sent', 'in_review', 'closed', 'cancelled')),
+  created_at timestamptz NOT NULL DEFAULT now(),
+  updated_at timestamptz NOT NULL DEFAULT now()
+);
+
 CREATE TABLE IF NOT EXISTS vinculos_evidencia (
   id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
   alerta_id uuid NOT NULL REFERENCES alertas(id) ON DELETE CASCADE,
@@ -285,6 +298,10 @@ CREATE INDEX IF NOT EXISTS idx_acciones_alerta_id ON acciones_alerta(alerta_id);
 CREATE INDEX IF NOT EXISTS idx_acciones_usuario_id ON acciones_alerta(usuario_id);
 CREATE INDEX IF NOT EXISTS idx_residentes_comunidad_id ON residentes(comunidad_id);
 CREATE INDEX IF NOT EXISTS idx_residentes_estado ON residentes(estado);
+CREATE INDEX IF NOT EXISTS idx_reportes_created_by_user_id ON reportes(created_by_user_id);
+CREATE INDEX IF NOT EXISTS idx_reportes_status ON reportes(status);
+CREATE INDEX IF NOT EXISTS idx_reportes_priority ON reportes(priority);
+CREATE INDEX IF NOT EXISTS idx_reportes_created_at ON reportes(created_at);
 CREATE INDEX IF NOT EXISTS idx_evidencia_alerta_id ON vinculos_evidencia(alerta_id);
 CREATE INDEX IF NOT EXISTS idx_evidencia_grabacion_id ON vinculos_evidencia(grabacion_id);
 CREATE INDEX IF NOT EXISTS idx_bitacora_actor ON bitacora_auditoria(actor_usuario_id);

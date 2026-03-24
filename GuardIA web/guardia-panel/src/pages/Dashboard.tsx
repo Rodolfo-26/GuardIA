@@ -115,7 +115,7 @@ export default function Dashboard() {
   }, [data.alerts, data.cameras]);
 
   const activity = useMemo<ActivityItem[]>(() => {
-    const alertEvents = data.alerts.slice(0, 4).map((alert) => ({
+    const alertEvents: ActivityItem[] = data.alerts.slice(0, 4).map((alert) => ({
       id: alert.id,
       zone: alert.zone,
       state: alert.title,
@@ -123,14 +123,14 @@ export default function Dashboard() {
       time: alert.time,
     }));
 
-    const cameraEvents = data.cameras
+    const cameraEvents: ActivityItem[] = data.cameras
       .filter((camera) => camera.status !== "online")
       .slice(0, 2)
       .map((camera) => ({
         id: camera.id,
         zone: camera.zone,
         state: camera.status === "offline" ? "Camara sin conexion" : "Camara en advertencia",
-        level: camera.status === "offline" ? "Alta" : "Media",
+        level: camera.status === "offline" ? ("Alta" as const) : ("Media" as const),
         time: camera.status === "offline" ? "Ahora" : "Reciente",
       }));
 

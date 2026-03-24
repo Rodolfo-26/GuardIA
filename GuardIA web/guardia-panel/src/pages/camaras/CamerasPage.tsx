@@ -1,9 +1,7 @@
 import { useEffect, useMemo, useState } from "react";
-import CameraRegistrationModal, {
-  type CameraRecord,
-} from "./components/CameraRegistrationModal";
+import CameraRegistrationModal from "./components/CameraRegistrationModal";
 import CameraDetailsModal from "./components/CameraDetailsModal";
-import { createCameraRecord, fetchCameras, updateCameraRecord } from "../../services/cameras";
+import { createCameraRecord, fetchCameras, updateCameraRecord, type CameraRecord } from "../../services/cameras";
 
 export default function CamerasPage() {
   const [cameras, setCameras] = useState<CameraRecord[]>([]);

@@ -62,3 +62,19 @@ export function serializeAudit(row) {
     changes: row.cambios_json ?? {},
   };
 }
+
+export function serializeReport(row) {
+  return {
+    id: row.id,
+    createdByUserId: row.created_by_firebase_uid ?? row.created_by_user_id,
+    createdByName: row.created_by_name ?? "Sin autor",
+    role: row.role,
+    type: row.type,
+    priority: row.priority,
+    location: row.ubicacion ?? "Sin ubicacion",
+    description: row.description,
+    status: row.status,
+    createdAt: row.created_at,
+    updatedAt: row.updated_at,
+  };
+}

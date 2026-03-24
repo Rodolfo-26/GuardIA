@@ -1,4 +1,4 @@
-import type { CameraRecord } from "./CameraRegistrationModal";
+import type { CameraRecord } from "../../../services/cameras";
 
 export default function CameraDetailsModal({
   camera,
@@ -44,7 +44,7 @@ export default function CameraDetailsModal({
         <div className="mt-4 rounded-xl border border-white/10 bg-slate-950/65 p-3">
           <p className="text-[11px] uppercase tracking-wide text-slate-400">Perfiles IA</p>
           <div className="mt-2 flex flex-wrap gap-2">
-            {camera.aiProfiles.map((profile) => (
+            {camera.aiProfiles.map((profile: string) => (
               <span
                 key={profile}
                 className="rounded-full border border-cyan-300/25 bg-cyan-400/10 px-2.5 py-1 text-[11px] font-semibold text-cyan-100"

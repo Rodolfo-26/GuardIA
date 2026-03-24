@@ -7,6 +7,7 @@ import AppLayout from "./layout/AppLayout";
 import AlertasPage from "./pages/AlertasPage";
 import Dashboard from "./pages/Dashboard";
 import GrabacionesPage from "./pages/GrabacionesPage";
+import ReportesPage from "./pages/ReportesPage";
 import ResidentsPage from "./pages/ResidentsPage";
 import UsuariosPage from "./pages/UsuariosPage";
 import CamerasPage from "./pages/camaras/CamerasPage";
@@ -55,6 +56,7 @@ export default function App() {
           <Route index element={<Navigate to="/dashboard" replace />} />
           <Route path="/dashboard" element={<Dashboard />} />
           <Route path="/monitoreo" element={<Monitoreo />} />
+          <Route path="/reportes" element={<ReportesPage />} />
           <Route
             path="/camaras"
             element={

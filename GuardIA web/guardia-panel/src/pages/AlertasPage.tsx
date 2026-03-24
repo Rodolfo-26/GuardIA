@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from "react";
-import { fetchAlerts, saveAlertWorkflow, type AlertAction, type AlertItem, type AlertLevel, type AlertStatus } from "../services/alerts";
+import { fetchAlerts, saveAlertWorkflow, type AlertItem, type AlertLevel, type AlertStatus } from "../services/alerts";
 
 const STATUS_OPTIONS: Array<AlertStatus | "Todas"> = ["Todas", "Nueva", "En proceso", "Resuelta"];
 const LEVEL_OPTIONS: Array<AlertLevel | "Todas"> = ["Todas", "Critica", "Alta", "Media", "Baja"];
@@ -62,7 +62,6 @@ export default function AlertasPage() {
     }
   }, [filtered, selectedId]);
 
-  const selected = filtered.find((alert) => alert.id === selectedId) ?? null;
   const detailAlert = alerts.find((alert) => alert.id === detailId) ?? null;
   const workflowAlert = alerts.find((alert) => alert.id === workflowId) ?? null;
 
@@ -408,6 +407,8 @@ function AlertWorkflowModal({
   if (!alert) return null;
 
   async function handleSave() {
+    if (!alert) return;
+
     try {
       setIsSaving(true);
       setError("");
@@ -419,13 +420,14 @@ function AlertWorkflowModal({
       });
 
       const selectedAssignee = assignees.find((item) => (item.uid ?? "__none__") === assignee);
+      const currentAlert = alert;
 
       onSaved({
-        ...alert,
+        ...currentAlert,
         assignee: selectedAssignee?.name ?? "Sin asignar",
         assigneeUid: assignee === "__none__" ? null : assignee,
         status: nextStatus,
-        notes: note || alert.notes,
+        notes: note || currentAlert.notes,
         lastUpdate: "Hace 1 min",
       });
     } catch (err) {
