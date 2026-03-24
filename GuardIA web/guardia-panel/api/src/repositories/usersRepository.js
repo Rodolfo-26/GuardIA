@@ -27,7 +27,7 @@ export async function listUsers(communityId) {
   const result = await query(
     `${usersBaseQuery}
      WHERE u.comunidad_id = $1
-     GROUP BY u.id, r.nombre
+     GROUP BY u.id, r.nombre, c.nombre
      ORDER BY u.nombre_completo ASC`,
     [communityId],
   );
@@ -40,7 +40,7 @@ export async function getUserById(userId, communityId) {
     `${usersBaseQuery}
      WHERE u.firebase_uid = $1
        AND u.comunidad_id = $2
-     GROUP BY u.id, r.nombre`,
+     GROUP BY u.id, r.nombre, c.nombre`,
     [userId, communityId],
   );
 
