@@ -14,6 +14,7 @@ export default function Sidebar({
 }) {
   const navigate = useNavigate();
   const { logout, appRole } = useAuth();
+  const isGuard = appRole === "Operador";
   const usersLabel = canManageUsers(appRole) ? "Usuarios" : "Mi perfil";
   const roleLabel = appRole === "Operador" ? "Guardia" : appRole ?? "Sin rol";
 
@@ -75,10 +76,10 @@ export default function Sidebar({
               <nav className="space-y-2 border-t border-white/10 pt-4">
                 {canAccessDashboard(appRole) && <NavItem label="Dashboard" to="/dashboard" />}
                 <NavItem label="Monitoreo" to="/monitoreo" />
-                {canAccessCameraInventory(appRole) && <NavItem label="Camaras" to="/camaras" />}
+                {!isGuard && canAccessCameraInventory(appRole) && <NavItem label="Camaras" to="/camaras" />}
                 <NavItem label="Reportes" to="/reportes" />
                 <NavItem label="Alertas" to="/alertas" />
-                <NavItem label="Grabaciones" to="/grabaciones" />
+                {!isGuard && <NavItem label="Grabaciones" to="/grabaciones" />}
                 <NavItem label={usersLabel} to="/usuarios" />
               </nav>
             </div>
