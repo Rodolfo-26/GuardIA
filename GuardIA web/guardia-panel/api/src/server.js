@@ -88,7 +88,7 @@ app.get("/health", async (_req, res, next) => {
   }
 });
 
-app.get("/users", requireAuth, async (req, res, next) => {
+app.get("/users", requireAuth, requireRole(["Admin", "Supervisor"]), async (req, res, next) => {
   try {
     const communityId = requireCommunityScope(req, res);
     if (!communityId) return;
@@ -105,6 +105,13 @@ app.get("/users/:id", requireAuth, async (req, res, next) => {
     const communityId = requireCommunityScope(req, res);
     if (!communityId) return;
 
+    const canManageUsers = req.authContext?.role === "Admin" || req.authContext?.role === "Supervisor";
+    const isSelfProfile = req.authContext?.uid === req.params.id;
+    if (!canManageUsers && !isSelfProfile) {
+      res.status(403).json({ message: "No tienes permisos para consultar este usuario." });
+      return;
+    }
+
     const user = await getUserById(req.params.id, communityId);
 
     if (!user) {
@@ -118,7 +125,7 @@ app.get("/users/:id", requireAuth, async (req, res, next) => {
   }
 });
 
-app.get("/audit/users", requireAuth, async (req, res, next) => {
+app.get("/audit/users", requireAuth, requireRole(["Admin", "Supervisor"]), async (req, res, next) => {
   try {
     const communityId = requireCommunityScope(req, res);
     if (!communityId) return;
