@@ -1,8 +1,6 @@
 import { useEffect, useState, type MouseEvent } from "react";
 import { useNavigate } from "react-router-dom";
 import { useAuth } from "../../context/AuthContext";
-import { firebaseAuth } from "../../lib/firebase";
-
 const packets = [
   { left: "8%", top: "15%", delay: "0s", duration: "8.5s" },
   { left: "22%", top: "70%", delay: "1.2s", duration: "10s" },
@@ -117,7 +115,7 @@ export default function Login() {
     const result = await login(email, password);
 
     if (result.ok) {
-      const pendingUid = firebaseAuth.currentUser?.uid;
+      const pendingUid = result.uid;
       if (pendingUid) {
         window.sessionStorage.setItem(getSecondFactorPendingKey(pendingUid), "pending");
       }
@@ -179,6 +177,7 @@ export default function Login() {
     const result = await verifyEmailSecondFactor(otpCode.trim());
     setIsSubmitting(false);
     if (result.ok) {
+      const currentUser = user;
       if (currentUser) {
         window.sessionStorage.removeItem(getSecondFactorPendingKey(currentUser.uid));
       }

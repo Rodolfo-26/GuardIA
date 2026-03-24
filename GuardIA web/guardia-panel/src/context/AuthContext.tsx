@@ -16,7 +16,7 @@ type AuthContextType = {
   isAuthReady: boolean;
   isAuthenticated: boolean;
   isSecondFactorVerified: boolean;
-  login: (email: string, password: string) => Promise<{ ok: boolean; message?: string }>;
+  login: (email: string, password: string) => Promise<{ ok: boolean; message?: string; uid?: string }>;
   beginEmailSecondFactor: () => Promise<{ ok: boolean; message?: string; expiresInSeconds?: number; debugCode?: string }>;
   verifyEmailSecondFactor: (code: string) => Promise<{ ok: boolean; message?: string }>;
   sendResetPassword: (email: string) => Promise<{ ok: boolean; message?: string }>;
@@ -83,6 +83,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   async function login(email: string, password: string) {
     try {
       const credentials = await signInWithEmailAndPassword(firebaseAuth, email, password);
+      setUser(credentials.user);
       window.sessionStorage.removeItem(getSecondFactorStorageKey(credentials.user.uid));
       window.sessionStorage.removeItem(getSecondFactorPendingKey(credentials.user.uid));
       setIsSecondFactorVerified(false);
@@ -93,7 +94,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
         // Login ya fue exitoso; este error no debe bloquear acceso.
         console.error("Login exitoso, pero fallo una sincronizacion posterior:", error);
       }
-      return { ok: true };
+      return { ok: true, uid: credentials.user.uid };
     } catch (error) {
       const code = typeof error === "object" && error && "code" in error ? String(error.code) : "";
 
