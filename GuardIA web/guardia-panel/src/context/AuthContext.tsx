@@ -39,6 +39,27 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     return `guardia-email-2fa-pending:${uid}`;
   }
 
+  async function resolveCurrentUser() {
+    const immediateUser = firebaseAuth.currentUser ?? user;
+    if (immediateUser) {
+      return immediateUser;
+    }
+
+    return new Promise<User | null>((resolve) => {
+      const timeout = window.setTimeout(() => {
+        unsubscribe();
+        resolve(null);
+      }, 2000);
+
+      const unsubscribe = onAuthStateChanged(firebaseAuth, (nextUser) => {
+        if (!nextUser) return;
+        window.clearTimeout(timeout);
+        unsubscribe();
+        resolve(nextUser);
+      });
+    });
+  }
+
   async function hydrateUserSecurity(nextUser: User) {
     try {
       await ensureUserProfile(nextUser);
@@ -85,7 +106,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       const credentials = await signInWithEmailAndPassword(firebaseAuth, email, password);
       setUser(credentials.user);
       window.sessionStorage.removeItem(getSecondFactorStorageKey(credentials.user.uid));
-      window.sessionStorage.removeItem(getSecondFactorPendingKey(credentials.user.uid));
+      window.sessionStorage.setItem(getSecondFactorPendingKey(credentials.user.uid), "pending");
       setIsSecondFactorVerified(false);
       try {
         await registerUserLogin(credentials.user);
@@ -112,7 +133,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
 
   async function beginEmailSecondFactor() {
     try {
-      const currentUser = firebaseAuth.currentUser;
+      const currentUser = await resolveCurrentUser();
       if (!currentUser) {
         return { ok: false, message: "No hay una sesion activa para validar." };
       }
@@ -143,7 +164,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
 
   async function verifyEmailSecondFactor(code: string) {
     try {
-      const currentUser = firebaseAuth.currentUser;
+      const currentUser = await resolveCurrentUser();
       if (!currentUser) {
         return { ok: false, message: "No hay una sesion activa para validar." };
       }

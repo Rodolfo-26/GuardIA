@@ -115,11 +115,6 @@ export default function Login() {
     const result = await login(email, password);
 
     if (result.ok) {
-      const pendingUid = result.uid;
-      if (pendingUid) {
-        window.sessionStorage.setItem(getSecondFactorPendingKey(pendingUid), "pending");
-      }
-
       if (rememberMe) {
         window.localStorage.setItem("guardia-remember-email", email.trim());
       } else {
@@ -130,8 +125,8 @@ export default function Login() {
       setIsSubmitting(false);
 
       if (!otpResult.ok) {
-        if (pendingUid) {
-          window.sessionStorage.removeItem(getSecondFactorPendingKey(pendingUid));
+        if (result.uid) {
+          window.sessionStorage.removeItem(getSecondFactorPendingKey(result.uid));
         }
         setError(otpResult.message ?? "No se pudo enviar el codigo de verificacion.");
         return;
