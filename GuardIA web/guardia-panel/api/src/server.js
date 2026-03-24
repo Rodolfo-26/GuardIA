@@ -21,9 +21,13 @@ import { serializeAudit, serializeReport, serializeUser } from "./serializers.js
 import { createAlertFromMobile, listAlerts, updateAlertWorkflow } from "./repositories/alertsRepository.js";
 import { createCamera, listCameras, updateCamera } from "./repositories/camerasRepository.js";
 import { listRecordings } from "./repositories/recordingsRepository.js";
+<<<<<<< HEAD
 import { listResidents } from "./repositories/residentsRepository.js";
 import { createReport, listReports } from "./repositories/reportsRepository.js";
 import { logEvent, LOG_FILE_PATH } from "./logger.js";
+=======
+import { createReport } from "./repositories/reportsRepository.js";
+>>>>>>> bd1a0fa (fix(api): fix reports table schema and repository)
 
 dotenv.config();
 
@@ -201,67 +205,7 @@ app.patch("/alerts/:id/workflow", requireAuth, requireRole(["Admin", "Supervisor
   }
 });
 
-app.post("/reports", requireAuth, async (req, res, next) => {
-  try {
-    const communityId = requireCommunityScope(req, res);
-    if (!communityId) return;
 
-    const { type, urgency, description, location, notifyZoneOnly } = req.body ?? {};
-
-    let severity = "media";
-    if (urgency === "Baja") severity = "baja";
-    if (urgency === "Alta") severity = "alta";
-
-    const createdByUserId = req.authContext?.dbUserId;
-    if (!createdByUserId) {
-      res.status(403).json({ message: "No fue posible identificar al usuario que genera el reporte." });
-      return;
-    }
-
-    const reportPriorityMap = {
-      Baja: "baja",
-      Media: "media",
-      Alta: "alta",
-    };
-
-    const reportId = await createReport({
-      createdByUserId,
-      role: req.authContext?.role?.toLowerCase() || "operador",
-      type: type || "otro",
-      priority: reportPriorityMap[urgency] || "media",
-      ubicacion: location || null,
-      description: description || "Sin descripcion proporcionada",
-      status: "sent",
-    });
-
-    const alertId = await createAlertFromMobile({
-      communityId,
-      title: `Reporte: ${type || "Otro"}`,
-      type: type || "reporte_usuario",
-      severity,
-      description: description || "Sin descripcion proporcionada",
-      metadata: { location, notifyZoneOnly, source: "mobile_app_report", folio: `GIA-${Date.now().toString().slice(-6)}` },
-    });
-
-    logEvent("info", "CRUD_ALERTS", "create_report", `Reporte creado con id ${alertId}`, {
-      reportId,
-      alertId,
-      type,
-      severity,
-      communityId,
-    });
-
-    res.status(201).json({
-      reportId,
-      id: alertId,
-      folio: `GIA-2026-${Date.now().toString().slice(-4)}`,
-      status: "sent",
-      message: "Reporte enviado exitosamente",
-    });
-  } catch (error) {
-    next(error);
-  }
-});
 
 app.post("/panic", requireAuth, async (req, res, next) => {
   try {
@@ -323,6 +267,60 @@ app.get("/residents", requireAuth, async (req, res, next) => {
     const items = await listResidents(communityId);
     res.json({ items });
   } catch (error) {
+    next(error);
+  }
+});
+
+app.post("/reports", requireAuth, async (req, res, next) => {
+  try {
+    const communityId = requireCommunityScope(req, res);
+    if (!communityId) return;
+
+    const {
+      created_by_user_id,
+      role,
+      type,
+      priority,
+      description,
+      status,
+      ubicacion,
+    } = req.body ?? {};
+
+    if (!created_by_user_id || !role || !type || !priority || !description || !status) {
+      res.status(400).json({ message: "Faltan campos obligatorios." });
+      return;
+    }
+
+    const validPriorities = ["baja", "media", "alta"];
+    if (!validPriorities.includes(priority)) {
+      res.status(400).json({ message: "Prioridad invalida. Use: baja, media, alta." });
+      return;
+    }
+
+    const createdId = await createReport({
+      firebase_uid: created_by_user_id,
+      role,
+      type,
+      priority,
+      description,
+      status,
+      ubicacion,
+    });
+
+    logEvent("info", "CRUD_REPORTS", "create_report", `Reporte puro creado con id ${createdId}`, {
+      reportId: createdId,
+      type,
+      priority,
+      communityId,
+    });
+
+    res.status(201).json({ ok: true, id: createdId });
+  } catch (error) {
+    if (error instanceof Error && error.message === "USER_NOT_FOUND") {
+      res.status(404).json({ message: "Usuario no encontrado." });
+      return;
+    }
+
     next(error);
   }
 });

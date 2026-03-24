@@ -27,31 +27,40 @@ export async function listReports(communityId) {
   return result.rows;
 }
 
+/**
+ * Crea un reporte en la tabla `reportes`.
+ * Recibe el firebase_uid del usuario y lo resuelve al id interno (uuid)
+ * de la tabla `usuarios` para cumplir con la FK.
+ */
 export async function createReport({
-  createdByUserId,
+  firebase_uid,
   role,
   type,
   priority,
-  ubicacion,
   description,
-  status = "sent",
+  status,
+  ubicacion,
 }) {
+  // Resolver firebase_uid → usuarios.id (uuid)
+  const userResult = await query(
+    `SELECT id FROM usuarios WHERE firebase_uid = $1 LIMIT 1`,
+    [firebase_uid],
+  );
+
+  if (!userResult.rows[0]) {
+    throw new Error("USER_NOT_FOUND");
+  }
+
+  const userId = userResult.rows[0].id;
+
   const result = await query(
     `
-      INSERT INTO reportes (
-        created_by_user_id,
-        role,
-        type,
-        priority,
-        ubicacion,
-        description,
-        status
-      )
+      INSERT INTO reportes (created_by_user_id, role, type, priority, description, status, ubicacion)
       VALUES ($1, $2, $3, $4, $5, $6, $7)
       RETURNING id
     `,
-    [createdByUserId, role, type, priority, ubicacion ?? null, description, status],
+    [userId, role, type, priority, description, status, ubicacion || null],
   );
 
-  return result.rows[0]?.id ?? null;
+  return result.rows[0].id;
 }

@@ -274,6 +274,21 @@ CREATE TABLE IF NOT EXISTS bitacora_auditoria (
   creado_en timestamptz NOT NULL DEFAULT now()
 );
 
+CREATE TABLE IF NOT EXISTS reportes (
+  id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+  created_by_user_id text NOT NULL,
+  role text NOT NULL,
+  type text NOT NULL,
+  priority text NOT NULL,
+  description text NOT NULL,
+  status text NOT NULL DEFAULT 'sent',
+  ubicacion text,
+  created_at timestamptz NOT NULL DEFAULT now()
+);
+
+CREATE INDEX IF NOT EXISTS idx_reportes_created_by ON reportes(created_by_user_id);
+CREATE INDEX IF NOT EXISTS idx_reportes_created_at ON reportes(created_at);
+
 CREATE INDEX IF NOT EXISTS idx_usuarios_firebase_uid ON usuarios(firebase_uid);
 CREATE INDEX IF NOT EXISTS idx_usuarios_comunidad_id ON usuarios(comunidad_id);
 CREATE INDEX IF NOT EXISTS idx_usuarios_rol_id ON usuarios(rol_id);
