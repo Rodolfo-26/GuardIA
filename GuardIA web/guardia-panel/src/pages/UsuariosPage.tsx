@@ -21,8 +21,9 @@ import RoleVerificationModal from "./usuarios/components/RoleVerificationModal";
 import { DetailRow, MetricCard, StatusTag, formatAuditAction } from "./usuarios/components/UsersUi";
 
 export default function UsuariosPage() {
-  const { user } = useAuth();
+  const { user, appRole } = useAuth();
   const currentUserId = user?.uid ?? "";
+  const canManageDirectory = appRole === "Admin" || appRole === "Supervisor";
   const [users, setUsers] = useState<AppUserRecord[]>([]);
   const [isLoading, setIsLoading] = useState(true);
   const [auditLogs, setAuditLogs] = useState<UserAuditRecord[]>([]);
@@ -59,6 +60,26 @@ export default function UsuariosPage() {
   useEffect(() => {
     if (!user?.uid) return;
 
+    if (!canManageDirectory) {
+      setViewMode("self");
+      setIsLoading(true);
+      setError("");
+      const unsubscribe = subscribeCurrentUser(
+        user.uid,
+        (items) => {
+          setUsers(items);
+          setIsLoading(false);
+          setError("");
+        },
+        () => {
+          setIsLoading(false);
+          setError("No fue posible cargar tu perfil desde la API.");
+        },
+      );
+
+      return () => unsubscribe();
+    }
+
     let fallbackUnsubscribe: (() => void) | null = null;
     let retryUnsubscribe: (() => void) | null = null;
 
@@ -71,6 +92,7 @@ export default function UsuariosPage() {
       },
       (err) => {
         const code = typeof err === "object" && err && "code" in err ? String(err.code) : "";
+        const message = err instanceof Error ? err.message : "";
         if (code.includes("permission-denied")) {
           fallbackUnsubscribe = subscribeCurrentUser(
             user.uid,
@@ -110,6 +132,22 @@ export default function UsuariosPage() {
           );
           return;
         }
+        if (message.includes("No tienes permisos")) {
+          fallbackUnsubscribe = subscribeCurrentUser(
+            user.uid,
+            (items) => {
+              setUsers(items);
+              setIsLoading(false);
+              setViewMode("self");
+              setError("");
+            },
+            () => {
+              setIsLoading(false);
+              setError("No fue posible cargar tu perfil desde la API.");
+            },
+          );
+          return;
+        }
         setIsLoading(false);
         setError("No fue posible cargar usuarios desde la API.");
       },
@@ -120,7 +158,7 @@ export default function UsuariosPage() {
       if (fallbackUnsubscribe) fallbackUnsubscribe();
       if (retryUnsubscribe) retryUnsubscribe();
     };
-  }, [user?.uid]);
+  }, [canManageDirectory, user?.uid]);
 
   useEffect(() => {
     if (viewMode === "self") {
