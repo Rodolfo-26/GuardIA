@@ -21,13 +21,9 @@ import { serializeAudit, serializeReport, serializeUser } from "./serializers.js
 import { createAlertFromMobile, listAlerts, updateAlertWorkflow } from "./repositories/alertsRepository.js";
 import { createCamera, listCameras, updateCamera } from "./repositories/camerasRepository.js";
 import { listRecordings } from "./repositories/recordingsRepository.js";
-<<<<<<< HEAD
 import { listResidents } from "./repositories/residentsRepository.js";
 import { createReport, listReports } from "./repositories/reportsRepository.js";
 import { logEvent, LOG_FILE_PATH } from "./logger.js";
-=======
-import { createReport } from "./repositories/reportsRepository.js";
->>>>>>> bd1a0fa (fix(api): fix reports table schema and repository)
 
 dotenv.config();
 
